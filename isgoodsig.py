@@ -22,10 +22,10 @@ def main():
 def checksig(sig):
 	count = 0
 	addr = 0
-	addr = find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+	addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
 	while addr != idc.BADADDR:
 		count = count + 1
-		addr = find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+		addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
 
 	return count
 

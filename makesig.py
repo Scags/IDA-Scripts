@@ -35,10 +35,10 @@ def print_wildcards(count):
 def is_good_sig(sig):
 	count = 0
 	addr = 0
-	addr = find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+	addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
 	while count <= 2 and addr != idc.BADADDR:
 		count = count + 1
-		addr = find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+		addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
 
 	return count == 1
 
