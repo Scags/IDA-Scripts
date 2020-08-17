@@ -5,12 +5,22 @@ from math import ceil
 
 import xml.etree.ElementTree as et
 
+IMPORT_VTABLE = 0
+VECTOR = None
+
 def add_struc_ex(name):
 	strucid = ida_struct.get_struc_id(name)
 	if strucid == idc.BADADDR:
 		strucid = ida_struct.add_struc(idc.BADADDR, name)
 
 	return strucid
+
+def add_struc_ex2(name):
+	strucid = ida_struct.get_struc_id(name)
+	if strucid != idc.BADADDR:
+		ida_struct.del_struc(ida_struct.get_struc(strucid))
+
+	return ida_struct.add_struc(idc.BADADDR, name)
 
 def calcszdata(sz):
 	absmax = ceil(sz/8.0)
@@ -90,7 +100,6 @@ def parse(c, struc):
 					return
 
 				# Have to be a little special with datatables
-				# Don't know how to import structs as struct members yet :(
 				if t.text == "datatable":
 					ida_struct.add_struc_member(struc, classname, offset, idc.FF_DWRD, None, 4)
 					sendtable = c.find("sendtable")
@@ -103,6 +112,10 @@ def parse(c, struc):
 								if strucid == idc.BADADDR:	# If this struct didn't exist, parse it
 									strucid = ida_struct.add_struc(idc.BADADDR, mycls)
 									parse(sendtable, ida_struct.get_struc(strucid))
+								ti = idaapi.tinfo_t()	# Assign the sendtable type to the struct
+								idaapi.parse_decl2(None, mycls + ";", ti, 0)
+								if str(ti) != "CAttributeList":		# HACK; this one doesn't work and idk what else to try
+									ida_struct.set_member_tinfo(struc, ida_struct.get_member(struc, offset), 0, ti, 0)
 							else:	# Iterate the array and update the struct member size, hackily
 								flag, sizemult = get_sendtable_size(sendtable)
 								if sizemult > 4:
@@ -124,10 +137,67 @@ def parse(c, struc):
 
 				if t.text == "vector":
 					ida_struct.add_struc_member(struc, classname, offset, idc.FF_DWRD, None, 12)
+					global VECTOR
+					ida_struct.set_member_tinfo(struc, ida_struct.get_member(struc, offset), 0, VECTOR, 0)
 				else:
 					returnval = ida_struct.add_struc_member(struc, classname, offset, flags, None, numbytes)
 					if returnval:
 						print("Could not add struct member {}.{}! Error {}".format(ida_struct.get_struc_name(struc.id), classname, returnval))
+
+def get_vtable(name):
+	# So, to assure that we're in a vtable, we need to find the thisoffset
+	# So we remangle this fucker
+	mangledname = "_ZTV{}{}".format(len(name), name)
+	# Then get the address where this mangled thisoffs is stored
+	return idc.get_name_ea_simple(mangledname)
+
+def import_vtable(classname, struc):
+	ea = get_vtable(classname)
+	if ea == idc.BADADDR:
+		return
+
+	# Mildly adapted from Asherkin's vtable dumper
+	ea = ea + 8		# Skip typeinfo and thisoffs
+
+	funcs = []
+	while ea != idc.BADADDR:
+		offs = idc.get_wide_dword(ea)
+		if not ida_bytes.is_code(ida_bytes.get_full_flags(offs)):
+			break
+		name = idc.get_name(offs, ida_name.GN_VISIBLE)
+		funcs.append(name)
+
+		ea = ida_bytes.next_not_tail(ea)
+
+#	print(funcs)
+
+	if not len(funcs):
+		return
+
+	strucid = add_struc_ex2(classname + "_vftable")
+	vstruc = ida_struct.get_struc(strucid)
+	for i in funcs:
+		# Gotta do a fancy demangle, it can't have special chars
+		# and there can't be multiples of the same name, so let's just jazz around all of that
+		demangled = idc.demangle_name(i, idc.get_inf_attr(idc.INF_SHORT_DN))
+		if demangled == None:
+			demangled = i
+		else:
+			demangled = demangled[demangled.find("::")+2:demangled.find("(")]
+			demangled = demangled.replace("~", "_").replace("<", "_").replace(">", "_")
+		while 1:
+			error = ida_struct.add_struc_member(vstruc, demangled, idc.BADADDR, idc.FF_DWRD, None, 4)
+
+			if error == 0:
+				break
+
+			demangled = demangled + "_"		# This is dumb but lol
+
+	# Now assign the vtable to the actual struct
+	ti = idaapi.tinfo_t()
+	idaapi.parse_decl2(None, classname + "_vftable;", ti, 0)
+	ti.create_ptr(ti)
+	ida_struct.set_member_tinfo(struc, ida_struct.get_member(struc, 0), 0, ti, 0)
 
 def parse_class(c):
 	if c is None:
@@ -137,6 +207,7 @@ def parse_class(c):
 		return
 
 	classname = c.attrib["name"]
+
 	ida_kernwin.replace_wait_box("Importing {}".format(classname))
 	strucid = add_struc_ex(classname)
 	struc = ida_struct.get_struc(strucid)
@@ -145,6 +216,10 @@ def parse_class(c):
 	m = ida_struct.get_member(struc, 0)
 	if m == None:
 		ida_struct.add_struc_member(struc, "vftable", 0, idc.FF_DWRD, None, 4)
+
+	global IMPORT_VTABLE
+	if IMPORT_VTABLE:
+		import_vtable(classname, struc)
 
 	if len(c):
 		parse(c[0], struc)
@@ -166,6 +241,10 @@ def make_basic_structs():
 		ida_struct.add_struc_member(struc, "x", idc.BADADDR, idc.FF_DWRD, None, 4)
 		ida_struct.add_struc_member(struc, "y", idc.BADADDR, idc.FF_DWRD, None, 4)
 		ida_struct.add_struc_member(struc, "z", idc.BADADDR, idc.FF_DWRD, None, 4)
+
+	global VECTOR
+	VECTOR = idaapi.tinfo_t()
+	idaapi.parse_decl2(None, "Vector;", VECTOR, 0)
 
 	strucid = ida_struct.get_struc_id("QAngle")
 	if strucid == idc.BADADDR:
@@ -192,10 +271,12 @@ def main():
 		ida_kernwin.warning("Something bad happened :(")
 		return
 
+	global IMPORT_VTABLE
+	IMPORT_VTABLE = ida_kernwin.ask_yn(1, "Import virtual tables for classes? (Longer)")
+
 	for i in tree:
 		parse_class(i)
 	ida_kernwin.hide_wait_box()
-
 
 if __name__ == "__main__":
 	main()
