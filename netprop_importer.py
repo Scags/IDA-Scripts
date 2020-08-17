@@ -3,8 +3,14 @@ import idaapi
 import idc
 from math import ceil
 
-import sys
 import xml.etree.ElementTree as et
+
+def add_struc_ex(name):
+	strucid = ida_struct.get_struc_id(name)
+	if strucid == idc.BADADDR:
+		strucid = ida_struct.add_struc(idc.BADADDR, name)
+
+	return strucid
 
 def calcszdata(sz):
 	absmax = ceil(sz/8.0)
@@ -25,6 +31,7 @@ def calcszdata(sz):
 def get_sendtable_size(sendtable):
 	size = 0
 	highestoffset = 0
+	highestflag = idc.FF_BYTE
 	for c in sendtable:
 		add = 0
 		t = c.find("type")
@@ -34,8 +41,7 @@ def get_sendtable_size(sendtable):
 		offset = c.find("offset")
 		offset = int(offset.text) if offset != None else None
 
-		if highestoffset < offset:
-			highestoffset = offset
+		highestoffset = max(offset, highestoffset)
 
 		if t.text == "datatable":
 			sendtable2 = c.find("sendtable")
@@ -43,21 +49,24 @@ def get_sendtable_size(sendtable):
 				mycls = sendtable2.attrib.get("name", None)
 				if mycls != None:
 				 	if not mycls.startswith("DT_"):		# An array with a baseclass datatable? Oh well
-						add = get_sendtable_size(sendtable2)
+						flag, add = get_sendtable_size(sendtable2)
+						highestflag = max(flag, highestflag)
 		else:
 			sz = c.find("bits")
 			sz = int(sz.text) if sz != None else None
 			if sz == None:
 				return
 
-			_, numbytes = calcszdata(sz)
+			flag, numbytes = calcszdata(sz)
+			highestflag = max(flag, highestflag)
 			add = numbytes
 
 		size = add + highestoffset
 
 	# Round up to the nearest 4 byte multiple
-	size = int(ceil(size / 4.0) * 4)
-	return size
+#	size = int(ceil(size / 4.0) * 4)
+	# Actually don't, some bools can get squeezed in there (e.g. CParticleSystem.m_bWeatherEffect)
+	return highestflag, size
 
 def parse(c, struc):
 	if c.tag == "sendtable":
@@ -91,13 +100,13 @@ def parse(c, struc):
 						 	if mycls.startswith("DT_"):
 								mycls = mycls.replace("DT_", "C", 1)
 								strucid = ida_struct.get_struc_id(mycls)
-								if strucid != idc.BADADDR:
-									ida_struct.del_struc(ida_struct.get_struc(strucid))
-								parse(sendtable, ida_struct.get_struc(ida_struct.add_struc(idc.BADADDR, mycls)))
+								if strucid == idc.BADADDR:	# If this struct didn't exist, parse it
+									strucid = ida_struct.add_struc(idc.BADADDR, mycls)
+									parse(sendtable, ida_struct.get_struc(strucid))
 							else:	# Iterate the array and update the struct member size, hackily
-								sizemult = get_sendtable_size(sendtable)
+								flag, sizemult = get_sendtable_size(sendtable)
 								if sizemult > 4:
-									ida_struct.set_member_type(struc, offset, idc.FF_DWRD, None, sizemult)
+									ida_struct.set_member_type(struc, offset, flag, None, sizemult)
 					return
 
 				sz = c.find("bits")
@@ -118,7 +127,7 @@ def parse(c, struc):
 				else:
 					returnval = ida_struct.add_struc_member(struc, classname, offset, flags, None, numbytes)
 					if returnval:
-						print("Could not add struct member {}::{}! Error {}".format(ida_struct.get_struc_name(struc.id), classname, returnval))
+						print("Could not add struct member {}.{}! Error {}".format(ida_struct.get_struc_name(struc.id), classname, returnval))
 
 def parse_class(c):
 	if c is None:
@@ -129,11 +138,13 @@ def parse_class(c):
 
 	classname = c.attrib["name"]
 	ida_kernwin.replace_wait_box("Importing {}".format(classname))
-	struc = None
-	strucid = ida_struct.get_struc_id(classname)
-	if strucid != idc.BADADDR:
-		ida_struct.del_struc(ida_struct.get_struc(strucid))
-	struc = ida_struct.get_struc(ida_struct.add_struc(idc.BADADDR, classname))
+	strucid = add_struc_ex(classname)
+	struc = ida_struct.get_struc(strucid)
+
+	# Add the vtable here, anywhere else and it might be slotted into a class w/o vfuncs
+	m = ida_struct.get_member(struc, 0)
+	if m == None:
+		ida_struct.add_struc_member(struc, "vftable", 0, idc.FF_DWRD, None, 4)
 
 	if len(c):
 		parse(c[0], struc)
