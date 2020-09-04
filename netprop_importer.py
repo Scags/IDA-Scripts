@@ -68,6 +68,9 @@ def get_sendtable_size(sendtable):
 				return
 
 			flag, numbytes = calcszdata(sz)
+			if t.text == "float":
+				flags = idc.FF_FLOAT
+				numbytes = 4
 			highestflag = max(flag, highestflag)
 			add = numbytes
 
@@ -129,8 +132,9 @@ def parse(c, struc):
 
 				flags, numbytes = calcszdata(sz)
 
-#				if t.text == "float":
-#					flags |= idc.FF_FLOAT
+				if t.text == "float":
+					flags = idc.FF_FLOAT
+					numbytes = 4
 
 #				print(idc.FF_BYTE, idc.FF_DWRD)
 #				print(flags, numbytes)
@@ -226,7 +230,7 @@ def parse_class(c):
 
 # Fix SM's bad xml structure
 def fix_xml(data):
-	for i in xrange(len(data)):
+	for i in range(len(data)):
 		data[i] = data[i].replace('""', '"')
 
 	data[3] = "<root name=\"root\">\n"
@@ -238,9 +242,9 @@ def make_basic_structs():
 	strucid = ida_struct.get_struc_id("Vector")
 	if strucid == idc.BADADDR:
 		struc = ida_struct.get_struc(ida_struct.add_struc(idc.BADADDR, "Vector"))
-		ida_struct.add_struc_member(struc, "x", idc.BADADDR, idc.FF_DWRD, None, 4)
-		ida_struct.add_struc_member(struc, "y", idc.BADADDR, idc.FF_DWRD, None, 4)
-		ida_struct.add_struc_member(struc, "z", idc.BADADDR, idc.FF_DWRD, None, 4)
+		ida_struct.add_struc_member(struc, "x", idc.BADADDR, idc.FF_FLOAT, None, 4)
+		ida_struct.add_struc_member(struc, "y", idc.BADADDR, idc.FF_FLOAT, None, 4)
+		ida_struct.add_struc_member(struc, "z", idc.BADADDR, idc.FF_FLOAT, None, 4)
 
 	global VECTOR
 	VECTOR = idaapi.tinfo_t()
@@ -249,16 +253,18 @@ def make_basic_structs():
 	strucid = ida_struct.get_struc_id("QAngle")
 	if strucid == idc.BADADDR:
 		struc = ida_struct.get_struc(ida_struct.add_struc(idc.BADADDR, "QAngle"))
-		ida_struct.add_struc_member(struc, "x", idc.BADADDR, idc.FF_DWRD, None, 4)
-		ida_struct.add_struc_member(struc, "y", idc.BADADDR, idc.FF_DWRD, None, 4)
-		ida_struct.add_struc_member(struc, "z", idc.BADADDR, idc.FF_DWRD, None, 4)
+		ida_struct.add_struc_member(struc, "x", idc.BADADDR, idc.FF_FLOAT, None, 4)
+		ida_struct.add_struc_member(struc, "y", idc.BADADDR, idc.FF_FLOAT, None, 4)
+		ida_struct.add_struc_member(struc, "z", idc.BADADDR, idc.FF_FLOAT, None, 4)
 
 def main():
+	ida_auto.set_ida_state(ida_auto.st_Work)
 	data = None
 	with open(ida_kernwin.ask_file(0, "*.xml", "Select a file to import")) as f:
 		data = f.readlines()
 
 	if data is None:
+		ida_auto.set_ida_state(ida_auto.st_Ready)
 		return
 
 	ida_kernwin.show_wait_box("Importing file")
@@ -269,6 +275,7 @@ def main():
 	if (tree is None):
 		ida_kernwin.hide_wait_box()
 		ida_kernwin.warning("Something bad happened :(")
+		ida_auto.set_ida_state(ida_auto.st_Ready)
 		return
 
 	global IMPORT_VTABLE
@@ -277,6 +284,7 @@ def main():
 	for i in tree:
 		parse_class(i)
 	ida_kernwin.hide_wait_box()
+	ida_auto.set_ida_state(ida_auto.st_Ready)
 
 if __name__ == "__main__":
 	main()
