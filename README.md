@@ -16,3 +16,14 @@ Takes a SourceMod signature input and detects if it's unique or not.
 Imports netprops and owner classes as structs and struct members into IDA's DB. Only works with the XML file provided by sm_dump_netprops_xml. It's still a WIP and doesn't catch all of them though; really shits the bed when it comes to datatables. You should also use the proper netprop dump for your OS, or else you will be very confused.
 
 You also have the option of importing vtables from the found classes into IDA. I plan on separating this into another script, but until then, this will work.
+
+
+### gamedata_checker.py ###
+
+Name says it all, but this verifies SourceMod gamedata files. This requires Valve's VDF library, install it with `pip install vdf`.
+
+Has a few quirks with it at the moment:
+- It does not support multi-line comments within gamedata files nor will it support multiple instances of `#default` keys. Parsing core SourceMod gamedata files is essentially verboten.
+- Windows or stripped VTable offsets cannot be verified.
+- Function overloads tends to mess up VTable offset checking; e.g. `GiveNamedItem`.
+- Offset checking is variably difficult depending on naming conventions. If the gamedata key name is either not named exactly the same as the function name, it will not be found; e.g. `OnTakeDamage` -> `CBaseEntity::OnTakeDamage` and `CTFPlayer::OnTakeDamage` -> `CBaseEntity::OnTakeDamage` but `TakeDamage` != `CBaseEntity::OnTakeDamage`.
