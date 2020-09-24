@@ -26,4 +26,4 @@ Has a few quirks with it at the moment:
 - It does not support multi-line comments within gamedata files nor will it support multiple instances of `#default` keys. Parsing core SourceMod gamedata files is essentially verboten.
 - Windows or stripped VTable offsets cannot be verified.
 - Function overloads tends to mess up VTable offset checking; e.g. `GiveNamedItem`.
-- Offset checking is variably difficult depending on naming conventions. If the gamedata key name is either not named exactly the same as the function name, it will not be found; e.g. `OnTakeDamage` -> `CBaseEntity::OnTakeDamage` and `CTFPlayer::OnTakeDamage` -> `CBaseEntity::OnTakeDamage` but `TakeDamage` != `CBaseEntity::OnTakeDamage`.
+- Offset checking is variably difficult depending on naming conventions. If the gamedata key name is not named exactly the same as the function name, it will not be found; e.g. `OnTakeDamage` -> `CBaseEntity::OnTakeDamage` and `CTFPlayer::OnTakeDamage` -> `CBaseEntity::OnTakeDamage` but `TakeDamage` != `CBaseEntity::OnTakeDamage`.
