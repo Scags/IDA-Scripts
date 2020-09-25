@@ -65,9 +65,6 @@ def get_thisoffs(name):
 	return idc.get_name_ea_simple(mangled)
 
 def read_vtable(funcname, ea):
-	if "(" in funcname:
-		funcname = funcname[:funcname.find("(")]
-
 	funcs = {}
 	offset = 0
 	while ea != idc.BADADDR:
@@ -88,11 +85,6 @@ def read_vtable(funcname, ea):
 		ea = ida_bytes.next_not_tail(ea)
 
 	# We've got a list of function names, let's do this really shittily because idk any other way
-
-	# Try by exactness
-	if "(" in funcname:
-		# If you've got a template func good luck
-		funcname = funcname[:funcname.find("(")]
 
 	# This is a good programmer who makes their gamedata the proper way :)
 	offs = funcs.get(funcname.lower(), -1)
@@ -127,6 +119,8 @@ def read_vtable(funcname, ea):
 # and perform option 1 on each
 # Windows can suck a wiener on this one
 def try_get_voffset(funcname):
+	if "(" in funcname:
+		funcname = funcname[:funcname.find("(")]
 	if "::" in funcname:
 		# Option 1
 		typename = funcname[:funcname.find("::")]
@@ -138,9 +132,6 @@ def try_get_voffset(funcname):
 			return offs
 
 		funcname = funcname[funcname.find("::")+2:]
-
-	if "(" in funcname:
-		funcname = funcname[:funcname.find("(")]
 
 	# Let's chug along all of these functions, woohoo for option 2!
 	for func in idautils.Functions():
@@ -210,17 +201,17 @@ def main():
 	if len(found["Signatures"].items()):
 		print("Signatures:")
 		for key, value in found["Signatures"].iteritems():
-			print("\t{} - {}".format(key, "VALID" if value else "INVALID"))
+			print("\t{} - {}".format(key, u"\u2713".encode("utf8") if value else "INVALID"))
 
 	if len(found["Offsets"].items()):
 		print("Offsets:")
 		for key, value in found["Offsets"].iteritems():
 			s = "\t{} - ".format(key)
 			if isinstance(value[1], list):
-				s += "{} == {} - {}".format(value[0], value[1], "VALID" if value[0] in value[1] else "INVALID")
+				s += "{} == {} - {}".format(value[0], value[1], u"\u2713".encode("utf8") if value[0] in value[1] else "INVALID")
 			else:
 				if int(value[0]) == int(value[1]):
-					s += "{} == {} - VALID".format(value[0], value[1])
+					s += "{} == {} - {}".format(value[0], value[1], u"\u2713".encode("utf8"))
 				else:
 					s += "{} == {} - {}".format(value[0], value[1], "NOT FOUND" if value[1] == -1 else "INVALID")
 
