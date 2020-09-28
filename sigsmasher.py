@@ -8,6 +8,9 @@ from time import time, strftime, gmtime
 
 MAX_SIG_LENGTH = 512
 
+FUNCS_SEGSTART = 0
+FUNCS_SEGEND = ida_ida.inf_get_max_ea()
+
 def get_dt_size(dtype):
 	if dtype == ida_ua.dt_byte:
 		return 1
@@ -27,12 +30,13 @@ def print_wildcards(count):
 	return "? " * count
 
 def is_good_sig(sig):
+	global FUNCS_SEGEND
 	count = 0
-	addr = 0
-	addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+	addr = 0	# Have to use 0 since sourcemod itself starts searching at 0
+	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while count <= 2 and addr != idc.BADADDR:
 		count = count + 1
-		addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
 	return count == 1
 
@@ -79,7 +83,7 @@ def makesig(func):
 			return "Signature is too long!"
 		# Save milliseconds and only check for good sigs after a fewish bytes
 		# Trust me, it matters
-		elif len(sig) > 8 and is_good_sig(sig):
+		elif sig.count(" ") >= 5 and is_good_sig(sig):
 			found = 1
 			break
 
@@ -109,6 +113,15 @@ def update_window(activity):
 		UPDATE_TIME = currtime
 		ida_kernwin.replace_wait_box(activity)
 
+def calc_func_segments():
+	global FUNCS_SEGSTART, FUNCS_SEGEND	
+	selector = idc.selector_by_name(".text")
+	if selector != idc.BADADDR:
+		segm = get_segm_by_sel(selector)
+		if segm != idc.BADADDR:
+			FUNCS_SEGSTART = idc.get_segm_start(segm)
+			FUNCS_SEGEND = idc.get_segm_end(segm)
+
 def main():
 	ida_auto.set_ida_state(ida_auto.st_Work)
 	root = {}
@@ -117,14 +130,10 @@ def main():
 	sigcount = 0
 	sigattempts = 0
 
-	maxea = None
-	selector = idc.selector_by_name(".text")
-	if selector != idc.BADADDR:
-		segm = get_segm_by_sel(selector)
-		if segm != idc.BADADDR:
-			maxea = idc.get_segm_end(segm)
+	global FUNCS_SEGSTART, FUNCS_SEGEND
+	calc_func_segments()
 
-	funcs = list(idautils.Functions(end = maxea))
+	funcs = list(idautils.Functions(FUNCS_SEGSTART, FUNCS_SEGEND))
 
 	alltime = 0.0
 	avgtime = 0.0
@@ -176,9 +185,11 @@ def main():
 		# Unfortunately, sigging takes progressively longer the further along the function list
 		# this goes, as makesig() searches from up to down while functions are ordered from up to down
 		# So this isn't really accurate but w/e
+
+		multpct = 2.0 - count / float(funccount)	# Scale up a bit the lower we start at the get a halfass decent eta
 		alltime += time() - starttime
 		avgtime = alltime / sigattempts
-		eta = int(avgtime * (funccount - count))
+		eta = int(avgtime * (funccount - count) * multpct)
 		etastr = strftime("%H:%M:%S", gmtime(eta))
 
 		count += 1
