@@ -136,9 +136,6 @@ def parse(c, struc):
 					flags = idc.FF_FLOAT
 					numbytes = 4
 
-#				print(idc.FF_BYTE, idc.FF_DWRD)
-#				print(flags, numbytes)
-
 				if t.text == "vector":
 					ida_struct.add_struc_member(struc, classname, offset, idc.FF_DWRD, None, 12)
 					global VECTOR
@@ -268,10 +265,15 @@ def main():
 		return
 
 	ida_kernwin.show_wait_box("Importing file")
-	fix_xml(data)
 	make_basic_structs()
 
-	tree = et.fromstringlist(data)
+	try:
+		# SM 1.10 <= has bad XML, assume its correct first then try to fix it
+		tree = et.fromstringlist(data)
+	except:
+		fix_xml(data)
+		tree = et.fromstringlist(data)
+
 	if (tree is None):
 		ida_kernwin.hide_wait_box()
 		ida_kernwin.warning("Something bad happened :(")
