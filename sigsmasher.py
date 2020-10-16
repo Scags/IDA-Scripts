@@ -9,7 +9,7 @@ from time import time, strftime, gmtime
 MAX_SIG_LENGTH = 512
 
 FUNCS_SEGSTART = 0
-FUNCS_SEGEND = ida_ida.inf_get_max_ea()
+FUNCS_SEGEND = None
 
 def get_dt_size(dtype):
 	if dtype == ida_ua.dt_byte:
