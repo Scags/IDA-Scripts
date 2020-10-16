@@ -114,13 +114,11 @@ def update_window(activity):
 		ida_kernwin.replace_wait_box(activity)
 
 def calc_func_segments():
-	global FUNCS_SEGSTART, FUNCS_SEGEND	
-	selector = idc.selector_by_name(".text")
-	if selector != idc.BADADDR:
-		segm = get_segm_by_sel(selector)
-		if segm != idc.BADADDR:
-			FUNCS_SEGSTART = idc.get_segm_start(segm)
-			FUNCS_SEGEND = idc.get_segm_end(segm)
+	global FUNCS_SEGSTART, FUNCS_SEGEND
+	segm = ida_segment.get_segm_by_name
+	if segm:
+		FUNCS_SEGSTART = idc.get_segm_start(segm)
+		FUNCS_SEGEND = idc.get_segm_end(segm)
 
 def main():
 	ida_auto.set_ida_state(ida_auto.st_Work)
