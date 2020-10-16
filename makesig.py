@@ -2,6 +2,8 @@ import idc
 import idautils
 import idaapi
 
+FUNCS_SEGEND  = ida_segment.get_segm_by_name(".text").end_ea
+
 def get_dt_size(dtype):
 	if dtype == ida_ua.dt_byte:
 		return 1
@@ -47,7 +49,6 @@ def makesig():
 
 	addr = funcstart
 	while addr != idc.BADADDR:
-
 		info = ida_ua.insn_t()
 		if not ida_ua.decode_insn(info, addr):
 			return None
@@ -76,7 +77,7 @@ def makesig():
 				if i >= size:
 					break
 
-		if (is_good_sig(sig)):
+		if is_good_sig(sig):
 			found = 1
 			break
 
@@ -89,7 +90,7 @@ def makesig():
 
 	l = len(sig) - 1
 	smsig = r"\x"
-	for i in xrange(l):
+	for i in range(l):
 		c = sig[i]
 		if c == " ":
 			smsig = smsig + r"\x"
@@ -98,7 +99,7 @@ def makesig():
 		else:
 			smsig = smsig + c
 
-	print("Signature for %s:\n%s\n%s\n" % (name, sig, smsig));
+	print("Signature for %s:\n%s\n%s" % (name, sig, smsig));
 	return smsig
 
 def main():

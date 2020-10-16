@@ -3,6 +3,8 @@ import idaapi
 import idc
 import vdf
 
+FUNCS_SEGEND = ida_segment.get_segm_by_name(".text").end_ea
+
 def get_os():
 	# Lazy af lol
 	return "linux" if ida_nalt.get_root_filename().endswith(".so") else "windows"
@@ -12,13 +14,14 @@ def checksig(sig):
 		# Just check for existence of this mangled name
 		return idc.get_name_ea_simple(sig[1:]) != idc.BADADDR
 
+	global FUNCS_SEGEND
 	sig = sig.replace(r"\x", " ").replace("2A", "?").replace("2a", "?").replace("\\", "").strip()
 	count = 0
 	addr = 0
-	addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while addr != idc.BADADDR:
 		count = count + 1
-		addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
 	return count == 1
 

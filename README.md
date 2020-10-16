@@ -32,3 +32,13 @@ Has a few quirks with it at the moment:
 ### sigsmasher.py ###
 
 Makes SourceMod ready signatures for every function in IDA's database. Yes, this will take a long, long time. Requires PyYAML so you'll need to `pip install pyyaml`. You have the option of only generating signatures for typed functions so this works very well with [Symbol Smasher](https://github.com/Scags/IDA-Source-Symbol-Smasher).
+
+
+### findmyfunc.py ###
+
+Takes a SourceMod signature and jumps you to the function it's for. If it's a bad signature, then you won't go anywhere.
+
+
+### nameresetter.py ###
+
+Resets the name of every function in IDA's database. Does not include library or external functions.

@@ -1,5 +1,7 @@
 import idc
-import ida_kernwin
+import idaapi
+
+FUNCS_SEGEND = ida_segment.get_segm_by_name(".text").end_ea
 
 def main():
 	sig = ida_kernwin.ask_str("", 0, "Insert signature: ")
@@ -20,12 +22,13 @@ def main():
 		print("Found {} instances of input signature".format(count))
 
 def checksig(sig):
+	global FUNCS_SEGEND
 	count = 0
 	addr = 0
-	addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while addr != idc.BADADDR:
 		count = count + 1
-		addr = idc.find_binary(addr, idc.SEARCH_DOWN|idc.SEARCH_NEXT, sig)
+		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
 	return count
 
