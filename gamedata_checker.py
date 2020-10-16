@@ -60,9 +60,19 @@ def get_gamedir(kv):
 
 	return gamedir
 
-def get_thisoffs(name):
-	mangled = "_ZTV{}{}".format(len(name), name)
-	return idc.get_name_ea_simple(mangled)
+def get_voffs(name):
+	os = get_os()
+	if os == "linux":
+		mangled = "_ZTV{}{}".format(len(name), name)
+		offset = 8
+	else:
+		mangled = "??_7{}@@6B@".format(name)
+		offset = 0
+
+	addr = idc.get_name_ea_simple(mangled)
+	if addr != idc.BADADDR:
+		addr += offset
+	return addr
 
 def read_vtable(funcname, ea):
 	funcs = {}
@@ -124,10 +134,10 @@ def try_get_voffset(funcname):
 	if "::" in funcname:
 		# Option 1
 		typename = funcname[:funcname.find("::")]
-		thisoffs = get_thisoffs(typename)
+		voffs = get_voffs(typename)
 		offs = -1
-		if thisoffs != idc.BADADDR:
-			offs = read_vtable(funcname, thisoffs + 8)
+		if voffs != idc.BADADDR:
+			offs = read_vtable(funcname, voffs)
 		if offs != -1:
 			return offs
 
@@ -136,7 +146,7 @@ def try_get_voffset(funcname):
 	# Let's chug along all of these functions, woohoo for option 2!
 	for func in idautils.Functions():
 		name = idc.get_name(func, ida_name.GN_VISIBLE)
-		if funcname not in name:	# funcname should only be a plain function decl, so it would be unfettered in a mangled name
+		if not name or funcname not in name:	# funcname should only be a plain function decl, so it would be unfettered in a mangled name
 			continue
 
 		demangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
@@ -154,9 +164,9 @@ def try_get_voffset(funcname):
 				continue				# same name as some non-class function and this will manage to catch that
 
 			typename = demangled[:demangled.find("::")]
-			thisoffs = get_thisoffs(typename)
-			if thisoffs != idc.BADADDR:
-				offs = read_vtable(funcname, thisoffs + 8)
+			voffs = get_voffs(typename)
+			if voffs != idc.BADADDR:
+				offs = read_vtable(funcname, voffs)
 				if offs != -1:
 					return offs
 
@@ -192,7 +202,7 @@ def main():
 				found["Signatures"][name] = checksig(s)
 
 	offsets = kv.get("Offsets")
-	if offsets and os != "windows":
+	if offsets:# and os != "windows":
 		for name, handle in offsets.items():
 			offset = handle.get(os, -1)
 			if offset != -1:
@@ -217,8 +227,8 @@ def main():
 
 			print(s)
 
-	if os == "windows" and kv.get("Offsets"):
-		print("Offset checking is not supported on Windows binaries")
+#	if os == "windows" and kv.get("Offsets"):
+#		print("Offset checking is not supported on Windows binaries")
 
 	ida_kernwin.warning("Check console for output")
 
