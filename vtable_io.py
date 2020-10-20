@@ -11,11 +11,18 @@ OS_Win = 1
 
 FUNCS = 0
 
+# For exporting successful table builds
+EXPORT = 0
+EXPORT_TABLE = {}
+
+Export_No = -1
+Export_YesOnly = 0
+Export_Yes = 1
+
 # Change to 0 to disable weak typing. This will speed up the script but you'll have a lot of shitty repeat names
-USE_WEAK_NAMES = True
+USE_WEAK_NAMES = 0
 
 def get_os():
-	global OS_Win, OS_Linux
 	# Lazy af lol
 	return OS_Linux if ida_nalt.get_root_filename().endswith(".so") else OS_Win
 
@@ -25,36 +32,32 @@ def get_bcompat_keys(d):
 def get_bcompat_items(d):
 	return d.items() if version_info[0] >= 3 else d.iteritems()
 
-def mangle_vtablename(name):
-	global OS_Linux
-
-	if get_os() == OS_Linux:
-		mangledname = "_ZTV{}{}".format(len(name), name)
-	else:
-		mangledname = "??_7{}@@6B@".format(name)
-
-	return mangledname
-
-# Does not work for complex types (templates, inner classes, etc)
-def get_vtable(name):
-	return idc.get_name_ea_simple(mangle_vtablename(name))
-
 def parse_vtable(ea, typename):
-	global OS_Linux, OS_Win
 	os = get_os()
 	if os == OS_Linux:
 		ea += 8
 	funcs = []
 
 	while ea != idc.BADADDR:
+		eatemp = ea
 		offs = idc.get_wide_dword(ea)
-		if not ida_bytes.is_code(ida_bytes.get_full_flags(ea)):
-			if ida_bytes.is_unknown(ida_bytes.get_full_flags(ea)):
+#		if ida_bytes.is_unknown(ida_bytes.get_full_flags(ea)):
+#			break
+
+		size = idc.get_item_size(ea)	# This is bad abd abadbadbadbabdbabdad but there's no other choice here
+		if size != 4:
+			# This looks like it might be a bug with IDA
+			# Random points of a vtable are getting turned into unknown data
+			if size != 1:
 				break
 
-			size = idc.get_item_size(ea)	# This is bad abd abadbadbadbabdbabdad but there's no other choice here
-			if size != 4:
-				break
+			s = "".join(["%02x" % idc.get_wide_byte(ea + i) for i in range(3, -1, -1)])#.replace("0x", "")
+			if not s.lower().startswith("ffff"):
+				ea = ida_bytes.next_not_tail(ea)
+				continue
+
+			offs = int(s, 16)
+			ea += 3
 
 		name = idc.get_name(offs, ida_name.GN_VISIBLE)
 		if name:
@@ -62,8 +65,6 @@ def parse_vtable(ea, typename):
 				if not(name.startswith("_Z") or name.startswith("__cxa")) or name.startswith("_ZTV"):
 					break 	# If we've exceeded past this vtable
 			elif name.startswith("??"):
-#				unmangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
-#				if not unmangled or typename not in unmangled:
 				break
 		else:
 			if os == OS_Win:
@@ -80,7 +81,7 @@ def parse_vtable(ea, typename):
 		funcs.append(name)
 
 		ea = ida_bytes.next_not_tail(ea)
-	return funcs
+	return funcs, eatemp
 
 # (funcaddr, funcname)
 def get_thunks(ea, typename, funclist):
@@ -102,16 +103,26 @@ def get_thunks(ea, typename, funclist):
 	thunklist = [get_func_postname(i) for i in funclist[funcidx:] if not isinstance(i, (int, long)) and not i.startswith("_ZTI") and not i.endswith(typename + "D1Ev")]
 
 	while ea != idc.BADADDR:
-		offs = idc.get_wide_dword(ea)
 		size = idc.get_item_size(ea)
-		if size != 4:
-			break
 
-		name = idc.get_name(offs, ida_name.GN_VISIBLE)
-		if name:
-			if name.startswith("??"):
-				if typename not in name:
+		# CTFRocketLauncher_DirectHit has its thunks below some random ass string
+		# Don't know what's up with that but we'll check 2 more offsets beyond that
+		if size != 4:
+			ea = ida_bytes.next_not_tail(ea)
+			size = idc.get_item_size(ea)
+			if size != 4:
+				ea = ida_bytes.next_not_tail(ea)
+				size = idc.get_item_size(ea)
+				if size != 4:	# This is really bad
 					break
+
+		offs = idc.get_wide_dword(ea)
+		name = idc.get_name(offs, ida_name.GN_VISIBLE)
+
+		if name:
+			if name.startswith("??_R4"):
+#				if typename not in name:
+#					break
 
 				gotthunks = True
 				ea = ida_bytes.next_not_tail(ea)
@@ -142,27 +153,24 @@ def read_vtables():
 
 	ida_kernwin.replace_wait_box("Reading vtables")
 	root = {}
-	found = set()
 	while ea < end and ea != idc.BADADDR:
 		dword = ida_bytes.get_wide_dword(ea)
 		name = idc.get_name(dword, ida_name.GN_VISIBLE)
 
-		if name and name.startswith("_ZTI") and not name in found:
+		if name and name.startswith("_ZTI"):
 			demangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
 			if not demangled:
 				ea = ida_bytes.next_head(ea, end)
 				continue
 
-			found.add(name)
-			actualname = demangled.split("'")[1]
-			vtable = get_vtable(actualname)
-			if vtable == idc.BADADDR:
-				ea = ida_bytes.next_head(ea, end)
-				continue
+			if ida_bytes.get_item_size(ea - 4) == 4 and ida_bytes.get_wide_dword(ea - 4) == 0:
+				actualname = demangled.split("'")[1]
 
-			node = parse_vtable(vtable, actualname)
-			if len(node):
-				root[actualname] = node
+				node, ea = parse_vtable(ea - 4, actualname)
+				if len(node):
+					root[actualname] = node
+
+				continue
 
 		ea = ida_bytes.next_head(ea, end)
 
@@ -211,8 +219,8 @@ def get_func_postname(name):
 	if unmangled is None:
 		return ""
 
-	if unmangled.find("::") != -1:
-		unmangled = unmangled[unmangled.find("::")+2:]
+	if unmangled[:unmangled.find("(")].rfind("::") != -1:
+		unmangled = unmangled[unmangled[:unmangled.find("(")].rfind("::")+2:]
 
 	return unmangled
 
@@ -264,7 +272,9 @@ def isinthunk(winname, thunk):
 FUCK = 30
 
 def prep_vtable(linuxtable, key, wintable, winv):
-	global FUNCS, USE_WEAK_NAMES, BAD
+	if not linuxtable.get(key):
+		return None
+
 	# Compat for 2.7, strings are in unicode
 	funclist = [i if isinstance(i, (int, long)) else i.encode("ascii") for i in linuxtable[key]]
 	thunks, thunklist = get_thunks(winv, key, funclist)
@@ -300,6 +310,7 @@ def prep_vtable(linuxtable, key, wintable, winv):
 				i += 1
 				continue
 
+		overloadname = get_func_sname(n)
 		shortname = get_func_postname(n)
 		if not shortname:
 			i += 1
@@ -308,12 +319,17 @@ def prep_vtable(linuxtable, key, wintable, winv):
 		# Windows skips the vtable function if it exists in the thunks and 
 		# the thunk does not jmp into it (because the thunk is the function)
 		try:
-			if i < len(wintable):
-				thunkidx = thunklist.index(shortname)
+			thunkidx = thunklist.index(shortname)
+			delete = 1
+		except:
+			thunkidx = -1
+			delete = 0
+		if i < len(wintable):
+			if thunkidx != -1 and thunkidx < len(thunks):
 				if not isinthunk(wintable[i], thunks[thunkidx]):
 					currname = idc.get_name(thunks[thunkidx][0], ida_name.GN_VISIBLE)
 
-					if currname and currname != funclist[i]:
+					if currname and currname != funclist[i] and EXPORT_MODE != Export_YesOnly:
 						nameflags = ida_name.SN_FORCE
 						if not currname.startswith("sub_"):
 							if not USE_WEAK_NAMES:
@@ -322,32 +338,33 @@ def prep_vtable(linuxtable, key, wintable, winv):
 
 							nameflags |= ida_name.SN_WEAK
 						elif USE_WEAK_NAMES:
+							global FUNCS
 							FUNCS += 1
 
 						idc.set_name(thunks[thunkidx][0], funclist[i], nameflags)
 
 					del funclist[i]
 					continue
-			else:	# Class has thunks at the end of the vtable
-					# This doesn't change anything but it should link up the lengths of both tables
+		else:	# Class has thunks at the end of the vtable
+				# This doesn't change anything but it should link up the lengths of both tables
+			if delete:
 				del funclist[i]
 				continue
-		except:
-			pass
 
-		node = funcoverloads.get(shortname, [])
+		node = funcoverloads.get(overloadname, [])
 
 		# Is this a half-ass decent overload
-		go = 0
+		go = 1
 		for loadnode in range(len(node)):
 			if not any([i - funclist.index(val) > FUCK for val in node[loadnode]]):
 				node[loadnode].append(n)
-				go = 1
+				go = 0
 				break
+
 		if go:
 			node.append([n])
 
-		funcoverloads[shortname] = node
+		funcoverloads[overloadname] = node
 		i += 1
 
 	for k, value in get_bcompat_items(funcoverloads):
@@ -401,8 +418,6 @@ def prep_vtable(linuxtable, key, wintable, winv):
 		print("WARNING: {} vtable may be wrong! L{} - W{} = {}".format(key, len(funclist), len(wintable), diff))
 
 	return funclist
-	# OK THIS IS REALLY REALLY BAD BUT SOMETIMES OVERLOADS GET DUPED AND IDK WHY
-#	return [val for n, val in enumerate(funclist) if val not in funclist[:n] or val.startswith("__cxa")]
 
 def write_vtable(winv, functable, typename):
 	global FUNCS
@@ -414,6 +429,11 @@ def write_vtable(winv, functable, typename):
 		name = idc.get_name(dword, ida_name.GN_VISIBLE)
 
 		if functable[i].startswith("__cxa"):
+			i += 1
+			ea = ida_bytes.next_not_tail(ea)
+			continue
+
+		if name == "__purecall":
 			i += 1
 			ea = ida_bytes.next_not_tail(ea)
 			continue
@@ -434,29 +454,104 @@ def write_vtable(winv, functable, typename):
 				continue
 
 			nameflags |= ida_name.SN_WEAK
-		elif USE_WEAK_NAMES:
+		elif not USE_WEAK_NAMES:
 			FUNCS += 1
 
 		idc.set_name(dword, functable[i], nameflags)
 		i += 1
 		ea = ida_bytes.next_not_tail(ea)
 
-def parse_from_key(linuxtable, key):
-	winv = get_vtable(key)
-	if winv == idc.BADADDR:
-		return
+def build_export_table(linlist, winlist):
+	for i, v in enumerate(linlist):
+		if isinstance(v, (int, long)):
+			linlist = linlist[:i]		# Skipping thisoffs
+			break
 
-	wintable = parse_vtable(winv, key)
+	listnode = linlist[:]
+
+	for i, v in enumerate(linlist):
+		name = str(v)
+		if name.startswith("__cxa"):
+			listnode[i] = None
+			continue
+
+		s = "L{:<6}".format(i)
+		try:
+			s += " W{}".format(winlist.index(name))
+		except:
+			pass
+
+		funcname = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
+		s = "{:<16} {}".format(s, funcname)
+		listnode[i] = s
+
+	return [i for i in listnode if i != None]
+
+def parse_from_key(linuxtable, key, winv):
+	wintable, eatemp = parse_vtable(winv, key)
 	if not len(wintable):
-		return
+		return eatemp
 
 	funclist = prep_vtable(linuxtable, key, wintable, winv)
-	write_vtable(winv, funclist, key)
+	if not funclist:
+		return eatemp
+
+	if EXPORT_MODE in (Export_Yes, Export_YesOnly):
+		global EXPORT_TABLE
+		EXPORT_TABLE[key] = build_export_table(linuxtable[key], funclist)
+
+	if EXPORT_MODE != Export_YesOnly:
+		write_vtable(winv, funclist, key)
+
+	return eatemp
+
+def search_for_vtables(linuxtable):
+	seg = ida_segment.get_segm_by_name(".rdata")
+	ea = seg.start_ea
+	end = seg.end_ea
+
+	found = set()
+	while ea < end and ea != idc.BADADDR:
+		if ida_bytes.get_item_size(ea) != 4 or ida_bytes.is_unknown(ida_bytes.get_full_flags(ea)):
+			ea = ida_bytes.next_head(ea, end)
+			continue
+
+		dword = ida_bytes.get_wide_dword(ea)
+		name = idc.get_name(dword, ida_name.GN_VISIBLE)
+
+		if name and name.startswith("??_R4"):
+			demangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
+			if not demangled or demangled in found:
+				ea = ida_bytes.next_head(ea, end)
+				continue
+
+			if ida_bytes.get_item_size(ea + 4) == 4 and ida_bytes.get_wide_dword(ea + 4) != 0:
+				disasm = idc.generate_disasm_line(ea + 4, 0)
+				if disasm and disasm.strip().startswith("dd offset"):
+					actualname = demangled.split("::`RTTI")[0][6:]
+					if actualname in found:
+						ea = ida_bytes.next_head(ea, end)
+						continue
+
+					found.add(actualname)
+
+					ea = parse_from_key(linuxtable, actualname, ea + 4)
+					continue
+
+		ea = ida_bytes.next_head(ea, end)
 
 def write_vtables():
 	f = ida_kernwin.ask_file(0, "*.json", "Select a file to import from")
 	if not f:
 		return
+
+	global EXPORT_MODE
+	EXPORT_MODE = ida_kernwin.ask_buttons("Yes", "Export only (do not type functions)", "No", -1, "Would you like to export virtual tables to a file?")
+
+	if EXPORT_MODE in (Export_Yes, Export_YesOnly):
+		exportfile = ida_kernwin.ask_file(1, "*.json", "Select a file to export virtual tables to")
+		if not exportfile:
+			return
 
 	linuxtable = None
 	ida_kernwin.replace_wait_box("Importing file")
@@ -464,18 +559,21 @@ def write_vtables():
 		linuxtable = json.load(f)
 
 	ida_kernwin.replace_wait_box("Comparing vtables")
-	for key in get_bcompat_keys(linuxtable):
-		parse_from_key(linuxtable, key)
+	search_for_vtables(linuxtable)
+#	for key in get_bcompat_keys(linuxtable):
+#		parse_from_key(linuxtable, key)
+
+	if EXPORT_MODE in (Export_Yes, Export_YesOnly):
+		with open(exportfile, "w") as f:
+			json.dump(EXPORT_TABLE, f, indent = 4, sort_keys = True)
 
 def main():
-	global OS_Linux
 	os = get_os()
 
 	if os == OS_Linux:
 		read_vtables()
 	else:
 		write_vtables()
-		global FUNCS
 		if FUNCS:
 			print("Successfully typed {} virtual functions".format(FUNCS))
 

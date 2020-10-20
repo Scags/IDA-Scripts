@@ -46,4 +46,4 @@ Resets the name of every function in IDA's database. Does not include library or
 
 ### vtable_io.py ###
 
-Imports and exports virtual tables. Run it through a Linux binary to export to a file, then run it through a Windows binary to import those VTables into the database. This is similar to [Asherkin's VTable Dumper](https://asherkin.github.io/vtable/) but doesn't suffer from the pitfalls of multiple inheritance. Since it doesn't have those liabilities, it's function typing will almost always be perfect. It currently does not work with templated or nested classes. 32-bit only for now.
+Imports and exports virtual tables. Run it through a Linux binary to export to a file, then run it through a Windows binary to import those VTables into the database. This is similar to [Asherkin's VTable Dumper](https://asherkin.github.io/vtable/) but doesn't suffer from the pitfalls of multiple inheritance. Since it doesn't have those liabilities, it's function typing will almost always be perfect. 32-bit only for now.
