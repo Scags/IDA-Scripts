@@ -11,6 +11,12 @@ MAX_SIG_LENGTH = 512
 FUNCS_SEGSTART = 0
 FUNCS_SEGEND = None
 
+# Change to 1 to have a very optimized makesig
+# Will produce useable signatures but theyll be a bit more volatile
+# since they rely on the position of the function in the binary
+# Uses the end of the function to search compared to the end of the .text segment
+ABSOLUTE_OPTIMIZATION = 0
+
 def get_dt_size(dtype):
 	if dtype == ida_ua.dt_byte:
 		return 1
@@ -29,14 +35,14 @@ def get_dt_size(dtype):
 def print_wildcards(count):
 	return "? " * count
 
-def is_good_sig(sig):
-	global FUNCS_SEGEND
+def is_good_sig(sig, funcend):
+	endea = funcend if ABSOLUTE_OPTIMIZATION else FUNCS_SEGEND
 	count = 0
 	addr = 0	# Have to use 0 since sourcemod itself starts searching at 0
-	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+	addr = ida_search.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while count <= 2 and addr != idc.BADADDR:
 		count = count + 1
-		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+		addr = ida_search.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
 	return count == 1
 
@@ -83,7 +89,7 @@ def makesig(func):
 			return "Signature is too long!"
 		# Save milliseconds and only check for good sigs after a fewish bytes
 		# Trust me, it matters
-		elif sig.count(" ") >= 5 and is_good_sig(sig):
+		elif sig.count(" ") >= 5 and is_good_sig(sig, funcend):
 			found = 1
 			break
 
@@ -115,10 +121,10 @@ def update_window(activity):
 
 def calc_func_segments():
 	global FUNCS_SEGSTART, FUNCS_SEGEND
-	segm = ida_segment.get_segm_by_name
-	if segm:
-		FUNCS_SEGSTART = idc.get_segm_start(segm)
-		FUNCS_SEGEND = idc.get_segm_end(segm)
+	seg = ida_segment.get_segm_by_name(".text")
+	if seg:
+		FUNCS_SEGSTART = seg.start_ea
+		FUNCS_SEGEND = seg.end_ea
 
 def main():
 	ida_auto.set_ida_state(ida_auto.st_Work)
@@ -128,7 +134,6 @@ def main():
 	sigcount = 0
 	sigattempts = 0
 
-	global FUNCS_SEGSTART, FUNCS_SEGEND
 	calc_func_segments()
 
 	funcs = list(idautils.Functions(FUNCS_SEGSTART, FUNCS_SEGEND))
