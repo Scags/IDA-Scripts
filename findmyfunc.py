@@ -3,7 +3,7 @@ import idaapi
 
 def getsigloc(sig):
 	segend = ida_segment.get_segm_by_name(".text").end_ea
-	addr = ida_search.find_binary(0, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+	addr = ida_search.find_binary(0, segend, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	return addr
 
 def main():
