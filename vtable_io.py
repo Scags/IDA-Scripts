@@ -276,7 +276,8 @@ def prep_vtable(linuxtable, key, wintable, winv):
 		return None
 
 	# Compat for 2.7, strings are in unicode
-	funclist = [i if isinstance(i, (int, long)) else i.encode("ascii") for i in linuxtable[key]]
+	if version_info[0] < 3:
+		funclist = [i if isinstance(i, (int, long)) else str(i) for i in linuxtable[key]]
 	thunks, thunklist = get_thunks(winv, key, funclist)
 
 	# We've got the thunks, now we don't need anything beyond another typeinfo
