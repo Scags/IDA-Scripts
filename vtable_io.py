@@ -87,9 +87,14 @@ def parse_vtable(ea, typename):
 def get_thunks(ea, typename, funclist):
 	funcidx = 0
 	for i in range(len(funclist)):
-		if isinstance(funclist[i], (int, long)):
-			funcidx = i
-			break
+		if version_info[0] < 3:
+			if isinstance(funclist[i], (int, long)):
+				funcidx = i
+				break
+		else:
+			if isinstance(funclist[i], int):
+				funcidx = i
+				break
 
 	# No thunks here
 	if not funcidx:
@@ -100,7 +105,8 @@ def get_thunks(ea, typename, funclist):
 
 	# Index all these thunks so they line up for when we check for an offset
 	# Get rid of extra destructor too
-	thunklist = [get_func_postname(i) for i in funclist[funcidx:] if not isinstance(i, (int, long)) and not i.startswith("_ZTI") and not i.endswith(typename + "D1Ev")]
+	instance = (int, long) if version_info[0] < 3 else int
+	thunklist = [get_func_postname(i) for i in funclist[funcidx:] if not isinstance(i, instance) and not i.startswith("_ZTI") and not i.endswith(typename + "D1Ev")]
 
 	while ea != idc.BADADDR:
 		size = idc.get_item_size(ea)
@@ -282,9 +288,14 @@ def prep_vtable(linuxtable, key, wintable, winv):
 
 	# We've got the thunks, now we don't need anything beyond another typeinfo
 	for i, v in enumerate(funclist):
-		if isinstance(v, (int, long)):
-			funclist = funclist[:i]		# Skipping thisoffs
-			break
+		if version_info[0] < 3:
+			if isinstance(v, (int, long)):
+				funclist = funclist[:i]		# Skipping thisoffs
+				break
+		else:
+			if isinstance(v, int):
+				funclist = funclist[:i]		# Skipping thisoffs
+				break
 
 	# Get rid of extra destructor for linux
 	for i, n in enumerate(funclist):
@@ -464,9 +475,14 @@ def write_vtable(winv, functable, typename):
 
 def build_export_table(linlist, winlist):
 	for i, v in enumerate(linlist):
-		if isinstance(v, (int, long)):
-			linlist = linlist[:i]		# Skipping thisoffs
-			break
+		if version_info[0] < 3:
+			if isinstance(v, (int, long)):
+				funclist = funclist[:i]		# Skipping thisoffs
+				break
+		else:
+			if isinstance(v, int):
+				funclist = funclist[:i]		# Skipping thisoffs
+				break
 
 	listnode = linlist[:]
 
