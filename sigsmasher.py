@@ -38,7 +38,9 @@ def print_wildcards(count):
 def is_good_sig(sig, funcend):
 	endea = funcend if ABSOLUTE_OPTIMIZATION else FUNCS_SEGEND
 	count = 0
-	addr = 0	# Have to use 0 since sourcemod itself starts searching at 0
+	addr = FUNCS_SEGSTART	# Linux has a .LOAD section in front
+							# The odds of this having matching bytes are about 0
+							# so let's just skip it, would save a lot of time
 	addr = ida_search.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while count <= 2 and addr != idc.BADADDR:
 		count = count + 1
