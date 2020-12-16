@@ -276,6 +276,7 @@ def prep_vtable(linuxtable, key, wintable, winv):
 	if not linuxtable.get(key):
 		return None
 
+	funclist = linuxtable[key]
 	# Compat for 2.7, strings are in unicode
 	if version_info[0] < 3:
 		funclist = [i if isinstance(i, (int, long)) else str(i) for i in linuxtable[key]]
@@ -468,7 +469,7 @@ def build_export_table(linlist, winlist):
 	instance = (int, long) if version_info[0] < 3 else int
 	for i, v in enumerate(linlist):
 		if isinstance(v, instance):
-			funclist = funclist[:i]		# Skipping thisoffs
+			linlist = linlist[:i]		# Skipping thisoffs
 			break
 
 	listnode = linlist[:]
