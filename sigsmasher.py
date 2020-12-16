@@ -97,7 +97,7 @@ def makesig(func):
 
 		addr = idc.next_head(addr, funcend)
 
-	if found is 0:
+	if found == 0:
 		return "Ran out of bytes!"
 
 	l = len(sig) - 1
