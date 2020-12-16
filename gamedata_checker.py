@@ -3,6 +3,8 @@ import idaapi
 import idc
 import vdf
 
+from sys import version_info
+
 FUNCS_SEGEND = ida_segment.get_segm_by_name(".text").end_ea
 
 def get_os():
@@ -14,7 +16,6 @@ def checksig(sig):
 		# Just check for existence of this mangled name
 		return idc.get_name_ea_simple(sig[1:]) != idc.BADADDR
 
-	global FUNCS_SEGEND
 	sig = sig.replace(r"\x", " ").replace("2A", "?").replace("2a", "?").replace("\\", "").strip()
 	count = 0
 	addr = 0
@@ -24,6 +25,9 @@ def checksig(sig):
 		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
 	return count == 1
+
+def get_bcompat_items(d):
+	return d.iteritems() if version_info[0] <= 2 else d.items()
 
 # Unfortunately I don't care too much about overtly complex gamedata files
 # If you have multiple #default's in you first subsection or you have #default
@@ -47,7 +51,7 @@ def get_gamedir(kv):
 			return ""
 	else:
 		# 1 item, see if it's a default
-		gamedir = kv.keys()[0]
+		gamedir = list(kv.keys())[0]
 		if gamedir == "#default":
 			default = kv.items()[0]
 			# If it has multiple supports, check and see if we're in there
@@ -58,7 +62,7 @@ def get_gamedir(kv):
 					if gamedir in default["#supported"].values():
 						return gamedir
 					return ""
-				return supported.values()[0]
+				return list(supported.values())[0]
 			return "#default"
 
 	return gamedir
@@ -110,7 +114,7 @@ def read_vtable(funcname, ea):
 
 	# Try by exact function name
 	funcnames = {}
-	for key, value in funcs.iteritems():
+	for key, value in get_bcompat_items(funcs):
 		# Function overloads can fuck right off
 		s = key[key.find("::")+2:].lower() if "::" in key else key.lower()
 		funcnames[s.lower()] = value
@@ -184,7 +188,7 @@ def main():
 		ida_kernwin.warning("Could not load file!")
 		return
 
-	kv = kv.values()[0]
+	kv = list(kv.values())[0]
 	os = get_os()
 	gamedir = get_gamedir(kv)
 	if not gamedir:
@@ -211,20 +215,21 @@ def main():
 			if offset != -1:
 				found["Offsets"][name] = [offset, try_get_voffset(name)]
 
+	checkmark = u"\u2713".encode("utf8") if version_info[0] <= 2 else "✓"
 	if len(found["Signatures"].items()):
 		print("Signatures:")
-		for key, value in found["Signatures"].iteritems():
-			print("\t{} - {}".format(key, u"\u2713".encode("utf8") if value else "INVALID"))
+		for key, value in get_bcompat_items(found["Signatures"]):
+			print("\t{} - {}".format(key, checkmark if value else "INVALID"))
 
 	if len(found["Offsets"].items()):
 		print("Offsets:")
-		for key, value in found["Offsets"].iteritems():
+		for key, value in get_bcompat_items(found["Offsets"]):
 			s = "\t{} - ".format(key)
 			if isinstance(value[1], list):
-				s += "{} == {} - {}".format(value[0], value[1], u"\u2713".encode("utf8") if value[0] in value[1] else "INVALID")
+				s += "{} == {} - {}".format(value[0], value[1], checkmark if value[0] in value[1] else "INVALID")
 			else:
 				if int(value[0]) == int(value[1]):
-					s += "{} == {} - {}".format(value[0], value[1], u"\u2713".encode("utf8"))
+					s += "{} == {} - {}".format(value[0], value[1], checkmark)
 				else:
 					s += "{} == {} - {}".format(value[0], value[1], "NOT FOUND" if value[1] == -1 else "INVALID")
 

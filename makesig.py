@@ -83,7 +83,7 @@ def makesig():
 
 		addr = idc.next_head(addr, funcend)
 
-	if found is 0:
+	if found == 0:
 		print(sig)
 		print("Ran out of bytes to create unique signature.");
 		return None

@@ -86,15 +86,11 @@ def parse_vtable(ea, typename):
 # (funcaddr, funcname)
 def get_thunks(ea, typename, funclist):
 	funcidx = 0
+	instance = (int, long) if version_info[0] < 3 else int
 	for i in range(len(funclist)):
-		if version_info[0] < 3:
-			if isinstance(funclist[i], (int, long)):
-				funcidx = i
-				break
-		else:
-			if isinstance(funclist[i], int):
-				funcidx = i
-				break
+		if isinstance(funclist[i], instance):
+			funcidx = i
+			break
 
 	# No thunks here
 	if not funcidx:
@@ -105,7 +101,6 @@ def get_thunks(ea, typename, funclist):
 
 	# Index all these thunks so they line up for when we check for an offset
 	# Get rid of extra destructor too
-	instance = (int, long) if version_info[0] < 3 else int
 	thunklist = [get_func_postname(i) for i in funclist[funcidx:] if not isinstance(i, instance) and not i.startswith("_ZTI") and not i.endswith(typename + "D1Ev")]
 
 	while ea != idc.BADADDR:
@@ -246,20 +241,20 @@ def isinthunk(winname, thunk):
 	b = idc.get_wide_byte(addr)
 	if b in (0xEB, 0xE9):
 		dis = idc.generate_disasm_line(addr, 0)
- 		try:
-	 		funcname = dis[dis.find("jmp")+3:].strip()
-	 		if funcname.find("short") != -1:
-	 			funcname = funcname[funcname.find("short")+5:].strip()
+		try:
+			funcname = dis[dis.find("jmp")+3:].strip()
+			if funcname.find("short") != -1:
+				funcname = funcname[funcname.find("short")+5:].strip()
 
-	 		# When this function gets typed, a comment is added
-	 		# Remove it
-	 		if funcname.find(";") != -1:
-	 			funcname = funcname[:funcname.find(";")]
+			# When this function gets typed, a comment is added
+			# Remove it
+			if funcname.find(";") != -1:
+				funcname = funcname[:funcname.find(";")]
 
-	 		if funcname == winname:
-	 			return True
-	 	except:
-	 		pass
+			if funcname == winname:
+				return True
+		except:
+			pass
 
 	return False
 
@@ -287,15 +282,11 @@ def prep_vtable(linuxtable, key, wintable, winv):
 	thunks, thunklist = get_thunks(winv, key, funclist)
 
 	# We've got the thunks, now we don't need anything beyond another typeinfo
+	instance = (int, long) if version_info[0] < 3 else int
 	for i, v in enumerate(funclist):
-		if version_info[0] < 3:
-			if isinstance(v, (int, long)):
-				funclist = funclist[:i]		# Skipping thisoffs
-				break
-		else:
-			if isinstance(v, int):
-				funclist = funclist[:i]		# Skipping thisoffs
-				break
+		if isinstance(v, instance):
+			funclist = funclist[:i]		# Skipping thisoffs
+			break
 
 	# Get rid of extra destructor for linux
 	for i, n in enumerate(funclist):
@@ -474,15 +465,11 @@ def write_vtable(winv, functable, typename):
 		ea = ida_bytes.next_not_tail(ea)
 
 def build_export_table(linlist, winlist):
+	instance = (int, long) if version_info[0] < 3 else int
 	for i, v in enumerate(linlist):
-		if version_info[0] < 3:
-			if isinstance(v, (int, long)):
-				funclist = funclist[:i]		# Skipping thisoffs
-				break
-		else:
-			if isinstance(v, int):
-				funclist = funclist[:i]		# Skipping thisoffs
-				break
+		if isinstance(v, instance):
+			funclist = funclist[:i]		# Skipping thisoffs
+			break
 
 	listnode = linlist[:]
 

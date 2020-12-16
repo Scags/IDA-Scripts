@@ -22,7 +22,6 @@ def main():
 		print("Found {} instances of input signature".format(count))
 
 def checksig(sig):
-	global FUNCS_SEGEND
 	count = 0
 	addr = 0
 	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
