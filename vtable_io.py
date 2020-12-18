@@ -155,23 +155,13 @@ def read_vtables():
 	ida_kernwin.replace_wait_box("Reading vtables")
 	root = {}
 	while ea < end and ea != idc.BADADDR:
-		dword = ida_bytes.get_wide_dword(ea)
-		name = idc.get_name(dword, ida_name.GN_VISIBLE)
+		typename = is_vtable(ea)
+		if typename:
+			node, ea = parse_vtable(ea, typename)
+			if len(node):
+				root[typename] = node
 
-		if name and name.startswith("_ZTI"):
-			demangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
-			if not demangled:
-				ea = ida_bytes.next_head(ea, end)
-				continue
-
-			if ida_bytes.get_item_size(ea - 4) == 4 and ida_bytes.get_wide_dword(ea - 4) == 0:
-				actualname = demangled.split("'")[1]
-
-				node, ea = parse_vtable(ea - 4, actualname)
-				if len(node):
-					root[actualname] = node
-
-				continue
+			continue
 
 		ea = ida_bytes.next_head(ea, end)
 
@@ -510,11 +500,34 @@ def parse_from_key(linuxtable, key, winv):
 
 	return eatemp
 
+def is_vtable(ea):
+	name = idc.get_name(ea)
+	if not name:
+		return ""
+
+	name = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
+	if not name:
+		return ""
+
+	if name.startswith("`vtable for'"):
+		name = name[12:]
+	elif name.endswith("::`vftable'"):
+		name = name[6:-11]
+	else:
+		return ""
+
+	# Anonymous namespace?
+#	if "'" in name or "`" in name:
+#		return ""
+	return name
+
 def search_for_vtables(linuxtable):
 	seg = ida_segment.get_segm_by_name(".rdata")
 	ea = seg.start_ea
 	end = seg.end_ea
 
+	# Windows is better off finding the COL and deducing the vtable position from there
+	# This is because vtables can be referenced before they are created in position of the binary
 	found = set()
 	while ea < end and ea != idc.BADADDR:
 		if ida_bytes.get_item_size(ea) != 4 or ida_bytes.is_unknown(ida_bytes.get_full_flags(ea)):
