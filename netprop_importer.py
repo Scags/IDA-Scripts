@@ -193,7 +193,7 @@ def import_vtable(classname, struc):
 			if error == 0:
 				break
 
-			demangled = "_{}".format(hex(ida_struct.get_struc_last_offset(vstruc) * 4 + 4)[2:])
+			demangled += "_{}".format(hex(ida_struct.get_struc_last_offset(vstruc) * 4 + 4)[2:])
 
 	# Now assign the vtable to the actual struct
 	ti = idaapi.tinfo_t()
