@@ -99,7 +99,8 @@ def makesig():
 		else:
 			smsig = smsig + c
 
-	print("Signature for %s:\n%s\n%s" % (name, sig, smsig));
+	len_smsig = len(smsig);
+        print("Signature for %s:\n%s\n%s\nSM Lenght(x86): %i\nSM Lenght(x64): %i" % (name, sig, smsig, len_smsig / 4, len_smsig / 8))
 	return smsig
 
 def main():
