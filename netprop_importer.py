@@ -84,7 +84,8 @@ def get_sendtable_size(sendtable):
 
 def parse(c, struc):
 	if c.tag == "sendtable":
-		if c.attrib.get("name", None) and c.attrib.get("name", None).startswith("DT_"):
+		name = c.attrib.get("name", None)
+		if name and name.startswith("DT_"):
 			for i in c:
 				parse(i, struc)
 	elif c.tag == "property":
@@ -193,7 +194,7 @@ def import_vtable(classname, struc):
 			if error == 0:
 				break
 
-			demangled += "_{}".format(hex(ida_struct.get_struc_last_offset(vstruc) * 4 + 4)[2:])
+			demangled += "_{}".format(hex(ida_struct.get_struc_last_offset(vstruc) + 4)[2:])
 
 	# Now assign the vtable to the actual struct
 	ti = idaapi.tinfo_t()

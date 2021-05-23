@@ -18,6 +18,11 @@ Has a few quirks with it at the moment:
 - Offset checking is variably difficult depending on naming conventions. If the gamedata key name is not named exactly the same as the function name, it will not be found; e.g. `OnTakeDamage` -> `CBaseEntity::OnTakeDamage` and `CTFPlayer::OnTakeDamage` -> `CBaseEntity::OnTakeDamage` but `TakeDamage` != `CBaseEntity::OnTakeDamage`.
 
 
+### getfuncoffset.py ###
+
+Get the offset from the cursor address and the start of a function. Useful for byte patching.
+
+
 ### isgoodsig.py ###
 
 Takes a SourceMod signature input and detects if it's unique or not.
@@ -28,6 +33,10 @@ Takes a SourceMod signature input and detects if it's unique or not.
 Python translation of [makesig](https://github.com/alliedmodders/sourcemod/blob/master/tools/ida_scripts/makesig.idc)
 
 
+### makesigfromhere.py ###
+
+Creates a signature from the cursor offset. Useful for byte patching.
+
 ### nameresetter.py ###
 
 Resets the name of every function in IDA's database. Does not include library or external functions.
@@ -37,12 +46,17 @@ Resets the name of every function in IDA's database. Does not include library or
 
 Imports netprops and owner classes as structs and struct members into IDA's DB. Only works with the XML file provided by sm_dump_netprops_xml. Datatables only work most of the time. You should also use the proper netprop dump for your OS, or else you will be very confused.
 
-You also have the option of importing vtables from the found classes into IDA. I plan on separating this into another script, but until then, this will work.
+You also have the option of importing vtables from the found classes into IDA. This is a bit more sane than the **vtable_structs.py** script, but only works on classes with netprops.
 
 
 ### sigsmasher.py ###
 
 Makes SourceMod ready signatures for every function in IDA's database. Yes, this will take a long, long time. Requires PyYAML so you'll need to `pip install pyyaml`. You have the option of only generating signatures for typed functions so this works very well with [Symbol Smasher](https://github.com/Scags/IDA-Source-Symbol-Smasher).
+
+
+### structaligner.py ###
+
+Sanitizes undefined struct members as if IDA had parsed a header file. Each structure will have its undefined members replaced with a one-byte-sized member in order to prevent pseudocode from falling apart. Only makes sense to use it after running the netprop importer.
 
 
 ### vtable_io.py ###
