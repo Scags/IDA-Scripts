@@ -42,7 +42,7 @@ def is_good_sig(sig, funcend):
 							# The odds of this having matching bytes are about 0
 							# so let's just skip it, would save a lot of time
 	addr = ida_search.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
-	while count <= 2 and addr != idc.BADADDR:
+	while count < 2 and addr != idc.BADADDR:
 		count = count + 1
 		addr = ida_search.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 

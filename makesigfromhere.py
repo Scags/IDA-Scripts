@@ -26,7 +26,7 @@ def is_good_sig(sig):
 	count = 0
 	addr = 0
 	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
-	while count <= 2 and addr != idc.BADADDR:
+	while count < 2 and addr != idc.BADADDR:
 		count = count + 1
 		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
