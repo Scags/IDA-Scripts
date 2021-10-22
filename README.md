@@ -30,7 +30,7 @@ Takes a SourceMod signature input and detects if it's unique or not.
 
 ### makesig.py ###
 
-Python translation of [makesig](https://github.com/alliedmodders/sourcemod/blob/master/tools/ida_scripts/makesig.idc)
+Python translation of [makesig](https://github.com/alliedmodders/sourcemod/blob/master/tools/ida_scripts/makesig.idc).
 
 
 ### makesigfromhere.py ###
@@ -51,7 +51,7 @@ You also have the option of importing vtables from the found classes into IDA. T
 
 ### sigsmasher.py ###
 
-Makes SourceMod ready signatures for every function in IDA's database. Yes, this will take a long, long time. Requires PyYAML so you'll need to `pip install pyyaml`. You have the option of only generating signatures for typed functions so this works very well with [Symbol Smasher](https://github.com/Scags/IDA-Source-Symbol-Smasher).
+Makes SourceMod ready signatures for every function in IDA's database. Yes, this will take a long, long time. Requires PyYAML so you'll need to `pip install pyyaml`. You have the option of only generating signatures for typed functions so this works very well with the Symbol Smasher.
 
 
 ### structaligner.py ###
