@@ -59,10 +59,23 @@ Makes SourceMod ready signatures for every function in IDA's database. Yes, this
 Sanitizes undefined struct members as if IDA had parsed a header file. Each structure will have its undefined members replaced with a one-byte-sized member in order to prevent pseudocode from falling apart. Only makes sense to use it after running the netprop importer.
 
 
+### symbolsmasher.py ###
+
+Renames functions in a stripped library database based on unique string cross-references.
+
+Running the script presents 2 options: you can read and export data from the current database, or you can import and write data into it.
+
+If you're on a symbol library, you should run it in read mode and export it to a file. This file is what is used to import back into a stripped binary.
+
+When on Windows or another stripped database, run the script in write mode and select the file you exported earlier. A solid amount of functions should be typed within a few seconds.
+
+This works well with the Signature Smasher. However to save you an hour or so, I publicly host dumps of most Source games [here](https://brewcrew.tf/sigdump).
+
 ### vtable_io.py ###
 
 Imports and exports virtual tables. Run it through a Linux binary to export to a file, then run it through a Windows binary to import those VTables into the database. This is similar to [Asherkin's VTable Dumper](https://asherkin.github.io/vtable/) but doesn't suffer from the pitfalls of multiple inheritance. Since it doesn't have those liabilities, it's function typing will almost always be perfect. 32-bit only for now.
 
+Only works on libraries that have virtual thunks *after* the virtual table declaration such as in TF2. Fixing this is a TODO.
 
 ### vtable_structs.py ###
 
