@@ -78,13 +78,7 @@ def add_struc_ex(name):
 
 	return strucid
 
-def struc_exists(name):
-	return idaapi.get_struc_id(name) != idc.BADADDR
-
 def import_vtable(typename, funcs):
-	if struc_exists(typename):
-		return
-
 	typestrucid = add_struc_ex(typename)
 	typestruc = idaapi.get_struc(typestrucid)
 	vstrucid = add_struc_ex(typename + "_vtbl")
