@@ -10,5 +10,4 @@ def main():
 
 	print("Offset from %X to %X:\n%d (0x%X)" % (funcstart, addr, addr - funcstart, addr - funcstart))
 
-if __name__ == "__main__":
-	main()
+main()

@@ -24,7 +24,7 @@ USE_WEAK_NAMES = 0
 
 def get_os():
 	# Lazy af lol
-	return OS_Linux if ida_nalt.get_root_filename().endswith(".so") else OS_Win
+	return OS_Linux if idaapi.get_root_filename().endswith(".so") else OS_Win
 
 def get_bcompat_keys(d):
 	return d.keys() if version_info[0] >= 3 else d.iterkeys()
@@ -41,7 +41,7 @@ def parse_vtable(ea, typename):
 	while ea != idc.BADADDR:
 		eatemp = ea
 		offs = idc.get_wide_dword(ea)
-#		if ida_bytes.is_unknown(ida_bytes.get_full_flags(ea)):
+#		if idaapi.is_unknown(idaapi.get_full_flags(ea)):
 #			break
 
 		size = idc.get_item_size(ea)	# This is bad abd abadbadbadbabdbabdad but there's no other choice here
@@ -53,13 +53,13 @@ def parse_vtable(ea, typename):
 
 			s = "".join(["%02x" % idc.get_wide_byte(ea + i) for i in range(3, -1, -1)])#.replace("0x", "")
 			if not s.lower().startswith("ffff"):
-				ea = ida_bytes.next_not_tail(ea)
+				ea = idaapi.next_not_tail(ea)
 				continue
 
 			offs = int(s, 16)
 			ea += 3
 
-		name = idc.get_name(offs, ida_name.GN_VISIBLE)
+		name = idc.get_name(offs, idaapi.GN_VISIBLE)
 		if name:
 			if os == OS_Linux:
 				if not(name.startswith("_Z") or name.startswith("__cxa")) or name.startswith("_ZTV"):
@@ -74,13 +74,13 @@ def parse_vtable(ea, typename):
 			# This is even worseworsoewewrosorooese
 			s = "%02x" % offs
 			if not s.lower().startswith("ffff"):
-				ea = ida_bytes.next_not_tail(ea)
+				ea = idaapi.next_not_tail(ea)
 				continue
 
 			name = (1 << 32) - int(offs)
 		funcs.append(name)
 
-		ea = ida_bytes.next_not_tail(ea)
+		ea = idaapi.next_not_tail(ea)
 	return funcs, eatemp
 
 # (funcaddr, funcname)
@@ -109,16 +109,16 @@ def get_thunks(ea, typename, funclist):
 		# CTFRocketLauncher_DirectHit has its thunks below some random ass string
 		# Don't know what's up with that but we'll check 2 more offsets beyond that
 		if size != 4:
-			ea = ida_bytes.next_not_tail(ea)
+			ea = idaapi.next_not_tail(ea)
 			size = idc.get_item_size(ea)
 			if size != 4:
-				ea = ida_bytes.next_not_tail(ea)
+				ea = idaapi.next_not_tail(ea)
 				size = idc.get_item_size(ea)
 				if size != 4:	# This is really bad
 					break
 
 		offs = idc.get_wide_dword(ea)
-		name = idc.get_name(offs, ida_name.GN_VISIBLE)
+		name = idc.get_name(offs, idaapi.GN_VISIBLE)
 
 		if name:
 			if name.startswith("??_R4"):
@@ -126,12 +126,12 @@ def get_thunks(ea, typename, funclist):
 #					break
 
 				gotthunks = True
-				ea = ida_bytes.next_not_tail(ea)
+				ea = idaapi.next_not_tail(ea)
 				continue
 		else:
 			s = "%02x" % offs
 			if not s.lower().startswith("ffff"):
-				ea = ida_bytes.next_not_tail(ea)
+				ea = idaapi.next_not_tail(ea)
 				continue
 
 			break
@@ -139,20 +139,20 @@ def get_thunks(ea, typename, funclist):
 		if gotthunks:
 			funcs.append((offs, name))
 
-		ea = ida_bytes.next_not_tail(ea)
+		ea = idaapi.next_not_tail(ea)
 
 	return funcs, thunklist
 
 def read_vtables():
-	f = ida_kernwin.ask_file(1, "*.json", "Select a file to export to")
+	f = idaapi.ask_file(1, "*.json", "Select a file to export to")
 	if not f:
 		return
 
-	seg = ida_segment.get_segm_by_name(".rodata")
+	seg = idaapi.get_segm_by_name(".rodata")
 	ea = seg.start_ea
 	end = seg.end_ea
 
-	ida_kernwin.replace_wait_box("Reading vtables")
+	idaapi.replace_wait_box("Reading vtables")
 	root = {}
 	while ea < end and ea != idc.BADADDR:
 		typename = is_vtable(ea)
@@ -163,9 +163,9 @@ def read_vtables():
 
 			continue
 
-		ea = ida_bytes.next_head(ea, end)
+		ea = idaapi.next_head(ea, end)
 
-	ida_kernwin.replace_wait_box("Exporting to file")
+	idaapi.replace_wait_box("Exporting to file")
 	with open(f, "w") as f:
 		json.dump(root, f, indent = 4, sort_keys = True)
 
@@ -321,16 +321,16 @@ def prep_vtable(linuxtable, key, wintable, winv):
 		if i < len(wintable):
 			if thunkidx != -1 and thunkidx < len(thunks):
 				if not isinthunk(wintable[i], thunks[thunkidx]):
-					currname = idc.get_name(thunks[thunkidx][0], ida_name.GN_VISIBLE)
+					currname = idc.get_name(thunks[thunkidx][0], idaapi.GN_VISIBLE)
 
 					if currname and currname != funclist[i] and EXPORT_MODE != Export_YesOnly:
-						nameflags = ida_name.SN_FORCE
+						nameflags = idaapi.SN_FORCE
 						if not currname.startswith("sub_"):
 							if not USE_WEAK_NAMES:
 								del funclist[i]
 								continue
 
-							nameflags |= ida_name.SN_WEAK
+							nameflags |= idaapi.SN_WEAK
 						elif USE_WEAK_NAMES:
 							global FUNCS
 							FUNCS += 1
@@ -419,17 +419,17 @@ def write_vtable(winv, functable, typename):
 	i = 0
 
 	while ea != idc.BADADDR and i < len(functable):
-		dword = ida_bytes.get_wide_dword(ea)
-		name = idc.get_name(dword, ida_name.GN_VISIBLE)
+		dword = idaapi.get_wide_dword(ea)
+		name = idc.get_name(dword, idaapi.GN_VISIBLE)
 
 		if functable[i].startswith("__cxa"):
 			i += 1
-			ea = ida_bytes.next_not_tail(ea)
+			ea = idaapi.next_not_tail(ea)
 			continue
 
 		if name == "__purecall":
 			i += 1
-			ea = ida_bytes.next_not_tail(ea)
+			ea = idaapi.next_not_tail(ea)
 			continue
 
 		if not name or name.startswith("??"):
@@ -437,23 +437,23 @@ def write_vtable(winv, functable, typename):
 
 		if functable[i] == name:
 			i += 1
-			ea = ida_bytes.next_not_tail(ea)
+			ea = idaapi.next_not_tail(ea)
 			continue
 
-		nameflags = ida_name.SN_FORCE
+		nameflags = idaapi.SN_FORCE
 		if not name.startswith("sub_"):
 			if not USE_WEAK_NAMES:
 				i += 1
-				ea = ida_bytes.next_not_tail(ea)
+				ea = idaapi.next_not_tail(ea)
 				continue
 
-			nameflags |= ida_name.SN_WEAK
+			nameflags |= idaapi.SN_WEAK
 		elif not USE_WEAK_NAMES:
 			FUNCS += 1
 
 		idc.set_name(dword, functable[i], nameflags)
 		i += 1
-		ea = ida_bytes.next_not_tail(ea)
+		ea = idaapi.next_not_tail(ea)
 
 def build_export_table(linlist, winlist):
 	instance = (int, long) if version_info[0] < 3 else int
@@ -522,7 +522,7 @@ def is_vtable(ea):
 	return name
 
 def search_for_vtables(linuxtable):
-	seg = ida_segment.get_segm_by_name(".rdata")
+	seg = idaapi.get_segm_by_name(".rdata")
 	ea = seg.start_ea
 	end = seg.end_ea
 
@@ -530,25 +530,25 @@ def search_for_vtables(linuxtable):
 	# This is because vtables can be referenced before they are created in position of the binary
 	found = set()
 	while ea < end and ea != idc.BADADDR:
-		if ida_bytes.get_item_size(ea) != 4 or ida_bytes.is_unknown(ida_bytes.get_full_flags(ea)):
-			ea = ida_bytes.next_head(ea, end)
+		if idaapi.get_item_size(ea) != 4 or idaapi.is_unknown(idaapi.get_full_flags(ea)):
+			ea = idaapi.next_head(ea, end)
 			continue
 
-		dword = ida_bytes.get_wide_dword(ea)
-		name = idc.get_name(dword, ida_name.GN_VISIBLE)
+		dword = idaapi.get_wide_dword(ea)
+		name = idc.get_name(dword, idaapi.GN_VISIBLE)
 
 		if name and name.startswith("??_R4"):
 			demangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
 			if not demangled or demangled in found:
-				ea = ida_bytes.next_head(ea, end)
+				ea = idaapi.next_head(ea, end)
 				continue
 
-			if ida_bytes.get_item_size(ea + 4) == 4 and ida_bytes.get_wide_dword(ea + 4) != 0:
+			if idaapi.get_item_size(ea + 4) == 4 and idaapi.get_wide_dword(ea + 4) != 0:
 				disasm = idc.generate_disasm_line(ea + 4, 0)
 				if disasm and disasm.strip().startswith("dd offset"):
 					actualname = demangled.split("::`RTTI")[0][6:]
 					if actualname in found:
-						ea = ida_bytes.next_head(ea, end)
+						ea = idaapi.next_head(ea, end)
 						continue
 
 					found.add(actualname)
@@ -556,27 +556,27 @@ def search_for_vtables(linuxtable):
 					ea = parse_from_key(linuxtable, actualname, ea + 4)
 					continue
 
-		ea = ida_bytes.next_head(ea, end)
+		ea = idaapi.next_head(ea, end)
 
 def write_vtables():
-	f = ida_kernwin.ask_file(0, "*.json", "Select a file to import from")
+	f = idaapi.ask_file(0, "*.json", "Select a file to import from")
 	if not f:
 		return
 
 	global EXPORT_MODE
-	EXPORT_MODE = ida_kernwin.ask_buttons("Yes", "Export only (do not type functions)", "No", -1, "Would you like to export virtual tables to a file?")
+	EXPORT_MODE = idaapi.ask_buttons("Yes", "Export only (do not type functions)", "No", -1, "Would you like to export virtual tables to a file?")
 
 	if EXPORT_MODE in (Export_Yes, Export_YesOnly):
-		exportfile = ida_kernwin.ask_file(1, "*.json", "Select a file to export virtual tables to")
+		exportfile = idaapi.ask_file(1, "*.json", "Select a file to export virtual tables to")
 		if not exportfile:
 			return
 
 	linuxtable = None
-	ida_kernwin.replace_wait_box("Importing file")
+	idaapi.replace_wait_box("Importing file")
 	with open(f) as f:
 		linuxtable = json.load(f)
 
-	ida_kernwin.replace_wait_box("Comparing vtables")
+	idaapi.replace_wait_box("Comparing vtables")
 	search_for_vtables(linuxtable)
 #	for key in get_bcompat_keys(linuxtable):
 #		parse_from_key(linuxtable, key)
@@ -590,10 +590,10 @@ def main():
 
 	if os == OS_Linux:
 		read_vtables()
+		print("Done!")
 	else:
 		write_vtables()
 		if FUNCS:
 			print("Successfully typed {} virtual functions".format(FUNCS))
 
-if __name__ == "__main__":
-	main()
+main()

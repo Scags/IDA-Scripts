@@ -14,12 +14,12 @@ Mode_Read = 1
 DEBUG = 0
 
 def get_action():
-	return ida_kernwin.ask_buttons("Reading from", "Writing to", "", 0, "What action are we performing on this database?")
+	return idaapi.ask_buttons("Reading from", "Writing to", "", 0, "What action are we performing on this database?")
 
 def get_file(action):
 	forsaving, rw, s = (1, "w", "write to") if action == Mode_Read else (0, "r", "read from")
 	fname = "*.json"
-	f = ida_kernwin.ask_file(forsaving, fname, "Choose a file to {}".format(s))
+	f = idaapi.ask_file(forsaving, fname, "Choose a file to {}".format(s))
 
 	return open(f, rw) if f else None
 
@@ -37,7 +37,7 @@ def update_window(activity, hidefuncs = False):
 		else:
 			return
 
-	ida_kernwin.replace_wait_box(activity)
+	idaapi.replace_wait_box(activity)
 
 # Format:
 # "String Name":
@@ -52,7 +52,7 @@ def build_xref_dict(strings):
 		xrefs[str(s)] = []
 
 		for xref in idautils.XrefsTo(s.ea):
-			funcname = ida_funcs.get_func_name(xref.frm)
+			funcname = idaapi.get_func_name(xref.frm)
 			if funcname is None:
 				continue
 
@@ -104,7 +104,7 @@ def write_exact_comp(strdict, funcdict, myfuncs):
 	count = 0
 
 	for strippedname, strippedlist in get_bcompat_iter(strdict):
-		if not ida_funcs.get_func_name(myfuncs[strippedname]).startswith("sub_"):
+		if not idaapi.get_func_name(myfuncs[strippedname]).startswith("sub_"):
 			continue
 
 		possibilities = []
@@ -122,8 +122,8 @@ def write_exact_comp(strdict, funcdict, myfuncs):
 			continue
 
 		if possibilities[0] not in FOUND_FUNCS and possibilities[0] not in myfuncs:
-#			print(ida_funcs.get_func_name(myfuncs[strippedname]))
-			idc.set_name(myfuncs[strippedname], possibilities[0], ida_name.SN_FORCE)
+#			print(idaapi.get_func_name(myfuncs[strippedname]))
+			idc.set_name(myfuncs[strippedname], possibilities[0], idaapi.SN_FORCE)
 			count += 1
 
 			FOUND_FUNCS.add(possibilities[0])
@@ -140,7 +140,7 @@ def write_simple_comp(strdict, funcdict, myfuncs, liw = True):
 	count = 0
 
 	for strippedname, strippedlist in get_bcompat_iter(strdict):
-		if not ida_funcs.get_func_name(myfuncs[strippedname]).startswith("sub_"):
+		if not idaapi.get_func_name(myfuncs[strippedname]).startswith("sub_"):
 			continue
 
 		possibilities = []
@@ -163,7 +163,7 @@ def write_simple_comp(strdict, funcdict, myfuncs, liw = True):
 			continue
 
 		if possibilities[0] not in FOUND_FUNCS and possibilities[0] not in myfuncs:
-			idc.set_name(myfuncs[strippedname], possibilities[0], ida_name.SN_FORCE)
+			idc.set_name(myfuncs[strippedname], possibilities[0], idaapi.SN_FORCE)
 			count += 1
 
 			FOUND_FUNCS.add(possibilities[0])
@@ -174,8 +174,8 @@ def write_simple_comp(strdict, funcdict, myfuncs, liw = True):
 	return count
 
 def get_bin_funcs():
-	seg = ida_segment.get_segm_by_name(".text")
-	return {ida_funcs.get_func_name(ea): ea for ea in idautils.Functions(seg.start_ea, seg.end_ea)}
+	seg = idaapi.get_segm_by_name(".text")
+	return {idaapi.get_func_name(ea): ea for ea in idautils.Functions(seg.start_ea, seg.end_ea)}
 
 # So to prevent bad things, we're going to destroy any functions that have the exact same string xrefs
 # This is to protect against inlining but ultimately fails as this compares direct values
@@ -194,7 +194,7 @@ def write_symbols(strings, file):
 	update_window("Loading file", True)
 	funcdict = json.load(file)
 	if not funcdict:
-		ida_kernwin.warning("Could not load function data from file")
+		idaapi.warning("Could not load function data from file")
 		return
 
 	strdict = build_data_dict(build_xref_dict(strings))
@@ -232,7 +232,6 @@ def main():
 
 	file = get_file(action)
 	if file is None:
-		ida_kernwin.warning("Invalid file specified!")
 		return
 
 #	strings = get_strs()
@@ -245,8 +244,7 @@ def main():
 		print("Successfully typed {} functions".format(len(FOUND_FUNCS)))
 		print("\t- {} Exact\n\t- {} Symboled in stripped\n\t- {} Stripped in symboled".format(c1, c2, c3))
 
-	ida_kernwin.hide_wait_box()
+	idaapi.hide_wait_box()
 	file.close()
 
-if __name__ == "__main__":
-	main()
+main()

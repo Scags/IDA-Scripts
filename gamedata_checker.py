@@ -5,11 +5,11 @@ import vdf
 
 from sys import version_info
 
-FUNCS_SEGEND = ida_segment.get_segm_by_name(".text").end_ea
+FUNCS_SEGEND = idaapi.get_segm_by_name(".text").end_ea
 
 def get_os():
 	# Lazy af lol
-	return "linux" if ida_nalt.get_root_filename().endswith(".so") else "windows"
+	return "linux" if idaapi.get_root_filename().endswith(".so") else "windows"
 
 def checksig(sig):
 	if sig[0] == '@':
@@ -19,10 +19,10 @@ def checksig(sig):
 	sig = sig.replace(r"\x", " ").replace("2A", "?").replace("2a", "?").replace("\\", "").strip()
 	count = 0
 	addr = 0
-	addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+	addr = idaapi.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while addr != idc.BADADDR:
 		count = count + 1
-		addr = ida_search.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+		addr = idaapi.find_binary(addr, FUNCS_SEGEND, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
 	return count == 1
 
@@ -36,7 +36,7 @@ def get_gamedir(kv):
 	gamedir = ""
 	# If we've got multiple games supported, so let's just ask
 	if len(kv.items()) > 1:
-		gamedir = ida_kernwin.ask_str("", 0, "There are multiple supported games with this file. Which game directory is this for?")
+		gamedir = idaapi.ask_str("", 0, "There are multiple supported games with this file. Which game directory is this for?")
 		# Not in the basic game shit, check for support in default
 		if gamedir not in kv.keys():
 			default = kv.get("#default")
@@ -58,7 +58,7 @@ def get_gamedir(kv):
 			supported = kv.get("#supported")
 			if supported:
 				if len(supported.items()) > 1:
-					gamedir = ida_kernwin.ask_str("", 0, "There are multiple supported games with this file. Which game directory is this for?")
+					gamedir = idaapi.ask_str("", 0, "There are multiple supported games with this file. Which game directory is this for?")
 					if gamedir in default["#supported"].values():
 						return gamedir
 					return ""
@@ -86,10 +86,10 @@ def read_vtable(funcname, ea):
 	offset = 0
 	while ea != idc.BADADDR:
 		offs = idc.get_wide_dword(ea)
-		if not ida_bytes.is_code(ida_bytes.get_full_flags(offs)):
+		if not idaapi.is_code(idaapi.get_full_flags(offs)):
 			break
 
-		name = idc.get_name(offs, ida_name.GN_VISIBLE)
+		name = idc.get_name(offs, idaapi.GN_VISIBLE)
 		demangled = idc.demangle_name(name, idc.get_inf_attr(idc.INF_SHORT_DN))
 		if demangled == None:
 			demangled = name
@@ -99,7 +99,7 @@ def read_vtable(funcname, ea):
 		funcs[demangled.lower()] = offset
 
 		offset += 1
-		ea = ida_bytes.next_not_tail(ea)
+		ea = idaapi.next_not_tail(ea)
 
 	# We've got a list of function names, let's do this really shittily because idk any other way
 
@@ -152,7 +152,7 @@ def try_get_voffset(funcname):
 
 	# Let's chug along all of these functions, woohoo for option 2!
 	for func in idautils.Functions():
-		name = idc.get_name(func, ida_name.GN_VISIBLE)
+		name = idc.get_name(func, idaapi.GN_VISIBLE)
 		if not name or funcname not in name:	# funcname should only be a plain function decl, so it would be unfettered in a mangled name
 			continue
 
@@ -181,18 +181,22 @@ def try_get_voffset(funcname):
 
 def main():
 	kv = None
-	with open(ida_kernwin.ask_file(0, "*.txt", "Select a gamedata file")) as f:
+	filereq = idaapi.ask_file(0, "*.txt", "Select a gamedata file")
+	if filereq == None:
+		return
+
+	with open(filereq) as f:
 		kv = vdf.load(f)
 
 	if kv == None:
-		ida_kernwin.warning("Could not load file!")
+		idaapi.warning("Could not load file!")
 		return
 
 	kv = list(kv.values())[0]
 	os = get_os()
 	gamedir = get_gamedir(kv)
 	if not gamedir:
-		ida_kernwin.warning("Could not find game directory in file")
+		idaapi.warning("Could not find game directory in file")
 		return
 
 	kv = kv[gamedir]
@@ -238,7 +242,6 @@ def main():
 #	if os == "windows" and kv.get("Offsets"):
 #		print("Offset checking is not supported on Windows binaries")
 
-	ida_kernwin.warning("Check console for output")
+	idaapi.ask_form("Validated\nCheck console for output")
 
-if __name__ == "__main__":
-	main()
+main()
