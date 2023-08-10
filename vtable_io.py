@@ -9,16 +9,38 @@ import re
 from sys import version_info
 from dataclasses import dataclass
 
+if idc.__EA64__:
+	ea_t = ctypes.c_uint64
+	ptr_t = ctypes.c_int64
+	get_ptr = idaapi.get_qword
+	# Calling this a lot so we'll speed up the invocations by manually implementing this here
+	def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == idaapi.FF_QWORD
+else:
+	ea_t = ctypes.c_uint32
+	ptr_t = ctypes.c_int32
+	get_ptr = idaapi.get_dword
+	def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == idaapi.FF_DWORD
+
+def is_off(f): return f & (idaapi.FF_0OFF|idaapi.FF_1OFF) != 0
+def is_code(f): return (f & idaapi.MS_CLS) == idaapi.FF_CODE
+def has_any_name(f): return (f & idaapi.FF_ANYNAME) != 0
+SHORTDN = idc.get_inf_attr(idc.INF_SHORT_DN)
+
 # Let's go https://www.blackhat.com/presentations/bh-dc-07/Sabanal_Yason/Paper/bh-dc-07-Sabanal_Yason-WP.pdf
 
-class RTTICompleteObjectLocator(ctypes.Structure):
-	_fields_ = [
+_RTTICompleteObjectLocator_fields = [
 		("signature",  ctypes.c_uint32), 					# signature
 		("offset",  ctypes.c_uint32), 						# offset of this vtable in complete class (from top)
 		("cdOffset",  ctypes.c_uint32), 					# offset of constructor displacement
 		("pTypeDescriptor",  ctypes.c_uint32), 				# ref TypeDescriptor
 		("pClassHierarchyDescriptor",  ctypes.c_uint32), 	# ref RTTIClassHierarchyDescriptor
 	]
+
+if idc.__EA64__:
+	_RTTICompleteObjectLocator_fields.append(("pSelf", ctypes.c_uint32)) # ref to object's base
+
+class RTTICompleteObjectLocator(ctypes.Structure):
+	_fields_ = _RTTICompleteObjectLocator_fields
 
 
 class TypeDescriptor(ctypes.Structure):
@@ -52,15 +74,15 @@ class RTTIBaseClassDescriptor(ctypes.Structure):
 
 class base_class_type_info(ctypes.Structure):
 	_fields_ = [
-		("basetype", ctypes.c_uint32), 						# Base class type
-		("offsetflags", ctypes.c_uint32), 					# Offset and info
+		("basetype", ea_t), 								# Base class type
+		("offsetflags", ea_t), 								# Offset and info
 	]
 
 
 class class_type_info(ctypes.Structure):
 	_fields_ = [
-		("pVFTable", ctypes.c_uint32), 						# reference to RTTI's vftable (__class_type_info)
-		("pName", ctypes.c_uint32), 						# ref to type name
+		("pVFTable", ea_t), 								# reference to RTTI's vftable (__class_type_info)
+		("pName", ea_t), 									# ref to type name
 	]
 
 # I don't think this is right, but every case I found looked to be correct
@@ -68,13 +90,13 @@ class class_type_info(ctypes.Structure):
 # Plus sometimes the flags member is 0x1, so it's not a thisoffs. Weird
 class pointer_type_info(class_type_info):
 	_fields_ = [
-		("flags", ctypes.c_uint32),							# Flags or something else
-		("pType", ctypes.c_uint32),							# ref to type
+		("flags", ea_t),									# Flags or something else
+		("pType", ea_t),									# ref to type
 	]
 
 class si_class_type_info(class_type_info):
 	_fields_ = [
-		("pParent", ctypes.c_uint32), 						# ref to parent type
+		("pParent", ea_t), 									# ref to parent type
 	]
 
 class vmi_class_type_info(class_type_info):
@@ -194,9 +216,17 @@ class VClass(object):
 			if thisoffs in wintable[self.name].vfuncs.keys():
 				return
 
+
+		# In 64-bit PEs, the COL references itself, remove this
 		xrefs = list(idautils.XrefsTo(colea))
+		if idc.__EA64__:
+			for n in range(len(xrefs)-1, -1, -1):
+				if xrefs[n].frm == colea + RTTICompleteObjectLocator.pSelf.offset:
+					del xrefs[n]
+
 		if len(xrefs) != 1:
 			print(f"[VTABLE IO] Multiple vtables point to same COL - {self.name} at {colea:#x}")
+			return
 
 		vtable = xrefs[0].frm + ctypes.sizeof(ea_t)
 		self.vfuncs[thisoffs] = parse_vtable_addresses(vtable)
@@ -232,23 +262,6 @@ FUNCS = 0
 
 WAITBOX = WaitBox()
 
-if idc.__EA64__:
-	ea_t = ctypes.c_uint64
-	ptr_t = ctypes.c_int64
-	get_ptr = idaapi.get_qword
-	# Calling this a lot so we'll speed up the invocations by manually implementing this here
-	def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == idaapi.FF_QWORD
-else:
-	ea_t = ctypes.c_uint32
-	ptr_t = ctypes.c_int32
-	get_ptr = idaapi.get_dword
-	def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == idaapi.FF_DWORD
-
-def is_off(f): return f & (idaapi.FF_0OFF|idaapi.FF_1OFF) != 0
-def is_code(f): return (f & idaapi.MS_CLS) == idaapi.FF_CODE
-def has_any_name(f): return (f & idaapi.FF_ANYNAME) != 0
-SHORTDN = idc.get_inf_attr(idc.INF_SHORT_DN)
-
 def get_os():
 	ftype = idaapi.get_file_type_name()
 	if "ELF" in ftype:
@@ -261,6 +274,11 @@ def get_os():
 def get_class_from_ea(classtype, ea):
 	bytestr = idaapi.get_bytes(ea, ctypes.sizeof(classtype))
 	return classtype.from_buffer_copy(bytestr)
+
+def rva_to_ea(ea):
+	if idc.__EA64__:
+		return idaapi.get_imagebase() + ea
+	return ea
 
 # Anything past Classname::
 # Thank you CTFPlayer::SOCacheUnsubscribed...
@@ -468,7 +486,7 @@ def read_ti_win():
 				# but we'll still warn the user that it might be garbage
 				refs = list(idautils.XrefsTo(ea))
 				if len(refs) == 1:
-					vtable = refs[0].frm + 4
+					vtable = refs[0].frm + ctypes.sizeof(ea_t)
 					tryfunc = get_ptr(vtable + ctypes.sizeof(ea_t))
 					func = idaapi.get_func(tryfunc)
 					if func is not None:
@@ -484,15 +502,21 @@ def read_ti_win():
 				print(f"[VTABLE IO] Invalid name at {ea:#x}. Possible unwind info. Ignoring...")
 				continue
 
+			# In 64-bit PEs, the COL references itself, remove this
+			refs = list(idautils.XrefsTo(ea))
+			if idc.__EA64__:
+				for n in range(len(refs)-1, -1, -1):
+					if refs[n].frm == ea + RTTICompleteObjectLocator.pSelf.offset:
+						del refs[n]
+
 			# Now that we have the COL, we can use it to find the vtable that utilizes it and its thisoffs
 			# We need to use this later because of overloads so we cache it in a list
-			refs = list(idautils.XrefsTo(ea))
 			if len(refs) != 1:
 				print(f"[VTABLE IO] Multiple vtables point to same COL - {name} at {ea:#x}")
 				continue
 
 			cols.append(ea)
-			vtable = refs[0].frm + 4
+			vtable = refs[0].frm + ctypes.sizeof(ea_t)
 			vtables.append(vtable)
 
 		# Can have RTTI without a vtable
@@ -598,19 +622,20 @@ def read_tinfo_win(classname, ti, winti, wintable, baseclasses):
 	# Sort of like a reverse insertion sort only not really a sort
 	for colea in ti.cols:
 		col = get_class_from_ea(RTTICompleteObjectLocator, colea)
-		hierarchydesc = get_class_from_ea(RTTIClassHierarchyDescriptor, col.pClassHierarchyDescriptor)
+		hierarchydesc = get_class_from_ea(RTTIClassHierarchyDescriptor, rva_to_ea(col.pClassHierarchyDescriptor))
 		numitems = hierarchydesc.numBaseClasses
-		arraystart = hierarchydesc.pBaseClassArray
+		arraystart = rva_to_ea(hierarchydesc.pBaseClassArray)
+		print(hex(arraystart), numitems)
 
 		# Go backwards because we should start parsing from the basest base class
 		for i in range(numitems - 1, -1, -1):
-			offset = arraystart + i * ctypes.sizeof(ptr_t)
-			descea = get_ptr(offset)
+			offset = arraystart + i * ctypes.sizeof(ctypes.c_uint32)
+			descea = rva_to_ea(idaapi.get_wide_dword(offset))
 			parentname = idaapi.demangle_name(idaapi.get_name(descea), SHORTDN)
 			if not parentname:
 				# Another undefining IDA moment
 #				print(f"[VTABLE IO] Invalid parent name at {offset:#x}")
-				typedesc = get_ptr(descea)
+				typedesc = rva_to_ea(idaapi.get_wide_dword(descea))
 				parentname = idaapi.demangle_name(idaapi.get_name(typedesc), SHORTDN)
 
 				# Should be impossible since this is the type descriptor
@@ -919,6 +944,7 @@ def write_vtables():
 	winti = read_ti_win()
 
 	WAITBOX.show("Generating windows vtables")
+	print("gen")
 	wintables = gen_win_tables(winti)
 
 	WAITBOX.show("Comparing vtables")

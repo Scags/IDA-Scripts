@@ -1,7 +1,6 @@
 import idc
 import idautils
 import idaapi
-import pyperclip
 
 def print_wildcards(count):
 	return "?" * count
