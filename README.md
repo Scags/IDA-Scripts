@@ -1,11 +1,9 @@
 # IDA Scripts
 Some random IDA scripts I wrote
 
+### distfromfunc.py ###
 
-### findmyfunc.py ###
-
-Takes a SourceMod signature and jumps you to the function it's for. If it's a bad signature, then you won't go anywhere.
-
+Get the offset from the cursor address and the start of a function. Useful for byte patching.
 
 ### gamedata_checker.py ###
 
@@ -18,14 +16,9 @@ Has a few quirks with it at the moment:
 - Offset checking is variably difficult depending on naming conventions. If the gamedata key name is not named exactly the same as the function name, it will not be found; e.g. `OnTakeDamage` -> `CBaseEntity::OnTakeDamage` and `CTFPlayer::OnTakeDamage` -> `CBaseEntity::OnTakeDamage` but `TakeDamage` != `CBaseEntity::OnTakeDamage`.
 
 
-### getfuncoffset.py ###
-
-Get the offset from the cursor address and the start of a function. Useful for byte patching.
-
-
 ### isgoodsig.py ###
 
-Takes a SourceMod signature input and detects if it's unique or not.
+Takes a SourceMod (or any) signature input and detects if it's unique or not.
 
 
 ### makesig.py ###
@@ -49,6 +42,11 @@ Imports netprops and owner classes as structs and struct members into IDA's DB. 
 You also have the option of importing vtables from the found classes into IDA. This is a bit more sane than the **vtable_structs.py** script, but only works on classes with netprops.
 
 
+### sigfind.py ###
+
+Takes a SourceMod (or any) signature and jumps you to the function it's for. If it's a bad signature, then you won't go anywhere.
+
+
 ### sigsmasher.py ###
 
 Makes SourceMod ready signatures for every function in IDA's database. Yes, this will take a long, long time. Requires PyYAML so you'll need to `pip install pyyaml`. You have the option of only generating signatures for typed functions so this works very well with the Symbol Smasher.
@@ -69,7 +67,7 @@ If you're on a symbol library, you should run it in read mode and export it to a
 
 When on Windows or another stripped database, run the script in write mode and select the file you exported earlier. A solid amount of functions should be typed within a few seconds.
 
-This works well with the Signature Smasher. However to save you an hour or so, I publicly host dumps of most Source games [here](https://brewcrew.tf/sigdump).
+This works well with the Signature Smasher. However to save you an hour or so, I publicly host dumps of most Source games [here](http://scag.site.nfoservers.com/sigdump).
 
 ### vtable_io.py ###
 
