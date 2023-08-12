@@ -5,6 +5,7 @@ import json
 import ctypes
 import time
 import re
+import os
 
 from sys import version_info
 from dataclasses import dataclass
@@ -24,7 +25,6 @@ else:
 def is_off(f): return f & (idaapi.FF_0OFF|idaapi.FF_1OFF) != 0
 def is_code(f): return (f & idaapi.MS_CLS) == idaapi.FF_CODE
 def has_any_name(f): return (f & idaapi.FF_ANYNAME) != 0
-SHORTDN = idc.get_inf_attr(idc.INF_SHORT_DN)
 
 # Let's go https://www.blackhat.com/presentations/bh-dc-07/Sabanal_Yason/Paper/bh-dc-07-Sabanal_Yason-WP.pdf
 
@@ -237,30 +237,95 @@ class VClass(object):
 # Possible pain point is differentiating between inheritedness
 @dataclass
 class VFunc:
-	ea: int
+	ea: int				# Address to this function
+	vaddr: int 			# Address to this function's reference in its vtable
 	mangledname: str
-	inherited: bool
+	inheritid: int
 	name: str
 	postname: str
 	sname: str
 
-def make_vfunc(ea=idc.BADADDR, mangledname="", inherited=False):
+def make_vfunc(ea=idc.BADADDR, mangledname="", inheritid=-1, vaddr=idc.BADADDR):
 	name = ""
 	postname = ""
 	sname = ""
 	if mangledname:
-		name = idaapi.demangle_name(mangledname, SHORTDN) or mangledname
+		name = idaapi.demangle_name(mangledname, idaapi.MNG_LONG_FORM) or mangledname
 		if name:
 			postname = get_func_postname(name)
 			sname = postname.split("(")[0]
-	return VFunc(ea, mangledname, inherited, name, postname, sname)
+	return VFunc(ea, vaddr, mangledname, inheritid, name, postname, sname)
+
+class VOptions(object):
+	StringMethod = 1 << 0
+	SkipMismatches = 1 << 1
+	CommentReusedFunctions = 1 << 2
+
+	DoNotExport = 0
+	ExportNormal = 1
+	ExportOnly = 2
+
+# Form for script options
+class VForm(idaapi.Form):
+
+	def __init__(self):
+		idaapi.Form.__init__(self, r"""STARTITEM 0
+BUTTON YES* Go
+BUTTON CANCEL Cancel
+VTable IO
+{FormChangeCb}
+<#Browse#Select a file to import from                     :{iFileImport}>
+           <##Import options##Parse type strings (for hashed type info):{rStringMethod}>    | <##Export options##Do not export:{rDoNotExport}>
+           <Skip vtable size mismatches:{rSkipMismatches}>	                                | <Export to file:{rExportNormal}>
+           <Comment reused functions:{rComment}>{cImportOptions}>		                    | <Export only (do not type functions):{rExportOnly}>{cExportOptions}>
+<#Browse#Select a file to export to (ignored if unchecked):{iFileExport}>
+		""", {
+			"FormChangeCb": idaapi.Form.FormChangeCb(self.OnFormChange),
+			"iFileImport": idaapi.Form.FileInput(open=True, value=idaapi.reg_read_string("vtable_io", "iFileImport", "*.json"), swidth=50),
+			"cImportOptions": idaapi.Form.ChkGroupControl(
+				("rStringMethod", "rSkipMismatches", "rComment"), value=idaapi.reg_read_int("vtable_io", VOptions.SkipMismatches | VOptions.CommentReusedFunctions, "cImportOptions")
+			),
+			"cExportOptions": idaapi.Form.RadGroupControl(
+				("rDoNotExport", "rExportNormal", "rExportOnly"), value=idaapi.reg_read_int("vtable_io", VOptions.DoNotExport, "cExportOptions")
+			),
+			"iFileExport": idaapi.Form.FileInput(save=True, value=idaapi.reg_read_string("vtable_io", "iFileExport", "*.json"), swidth=50),
+		})
+
+	def OnFormChange(self, fid):
+		# print(fid)
+		return 1
+
+	@staticmethod
+	def init_options():
+		f = VForm()
+		f, _ = f.Compile()
+		go = f.Execute()
+		if not go:
+			return None
+
+		options = VOptions()
+		for control in f.controls.keys():
+			if control != "FormChangeCb":
+				currval = getattr(f, control).value
+				setattr(options, control, currval)
+				if isinstance(currval, str):
+					idaapi.reg_write_string("vtable_io", currval, control)
+				elif isinstance(currval, int):
+					idaapi.reg_write_int("vtable_io", currval, control)
+				else:
+					print(f"Unsupported type for {control} - {type(currval)}")
+
+		f.Free()
+		return options
 
 OS_Linux = 0
 OS_Win = 1
 
 FUNCS = 0
+EXPORTS = 0
 
 WAITBOX = WaitBox()
+VOPTIONS = None
 
 def get_os():
 	ftype = idaapi.get_file_type_name()
@@ -284,8 +349,23 @@ def rva_to_ea(ea):
 # Thank you CTFPlayer::SOCacheUnsubscribed...
 def get_func_postname(name):
 	retname = name
-	if retname[:retname.find("(")].rfind("::") != -1:
-		retname = retname[retname[:retname.find("(")].rfind("::")+2:]
+	template = 0
+	iterback = 0
+	for i, c in enumerate(retname):
+		if c == "<":
+			template += 1
+		elif c == ">":
+			template -= 1
+		# Find ( and break if we're not in a template
+		elif c == "(" and template == 0:
+			iterback = i
+			break
+
+	# Run backwards from ( until we hit a ::
+	for i in range(iterback, -1, -1):
+		if retname[i] == ":":
+			retname = retname[i+1:]
+			break
 
 	return retname
 
@@ -332,7 +412,7 @@ def parse_vtable_addresses(ea):
 		if not is_code(fflags):
 			break
 
-		funcs.append(make_vfunc(ea=offs))
+		funcs.append(make_vfunc(ea=offs, vaddr=ea))
 
 		ea = idaapi.next_head(ea, idc.BADADDR)
 	return funcs
@@ -364,7 +444,7 @@ def get_tinfo_vtables(ea, tinfos, vtables):
 	for tinfoxref in idautils.XrefsTo(ea, idaapi.XREF_DATA):
 		count = 0
 		mangled = idaapi.get_name(tinfoxref.frm)
-		demangled = idc.demangle_name(mangled, SHORTDN)
+		demangled = idc.demangle_name(mangled, idaapi.MNG_LONG_FORM)
 		if demangled is None:
 			print(f"[VTABLE IO] Invalid name at {tinfoxref.frm:#x}")
 			continue
@@ -427,102 +507,138 @@ def read_vtables_linux():
 	with open(f, "w") as f:
 		json.dump(jsondata, f, indent=4, sort_keys=True)
 
+def parse_ti(ea, tis):
+	typedesc = ea
+	flags = idaapi.get_full_flags(ea)
+	if is_code(flags):
+		return
+
+	try:
+		classname = idaapi.demangle_name(idc.get_name(ea), idaapi.MNG_SHORT_FORM)
+		classname = classname.removeprefix("class ")
+		classname = classname.removeprefix("struct TypeDescriptor ")
+		classname = classname.removesuffix(" `RTTI Type Descriptor'")
+	except:
+		print(f"[VTABLE IO] Invalid vtable name at {ea:#x}")
+		return
+	
+	if classname in tis.keys():
+		return
+
+	cols = []
+	vtables = []
+
+	# Then figure out which xref is a/the COL
+	for xref in idautils.XrefsTo(typedesc):
+		ea = xref.frm
+		flags = idaapi.get_full_flags(ea)
+
+		# Dynamic cast
+		if is_code(flags):
+			continue
+
+		name = idaapi.get_name(ea)
+		# Class type descriptor and/or random global data
+		# Kind of a hack but let's assume no one will rename these
+		if name and (name.startswith("??_R1") or name.startswith("off_")):
+			continue
+
+		ea -= 4
+		name = idaapi.get_name(ea)
+		# Catchable types
+		if name and name.startswith("__CT"):
+			continue
+
+		# COL
+		ea -= 8
+		workaround = False
+		if idaapi.is_unknown(idaapi.get_full_flags(ea)):
+			print(f"[VTABLE IO] Possible COL is unknown at {ea:#x}. This may be an unreferenced vtable. Trying workaround...")
+			# This might be a bug with IDA, but sometimes the COL isn't analyzed
+			# If there's still a reference, then we can still trace back
+			# If there is a list of functions (or even just one), then it's probably a vtable, 
+			# but we'll still warn the user that it might be garbage
+			refs = list(idautils.XrefsTo(ea))
+			if len(refs) == 1:
+				vtable = refs[0].frm + ctypes.sizeof(ea_t)
+				tryfunc = get_ptr(vtable + ctypes.sizeof(ea_t))
+				funcflags = idaapi.get_full_flags(tryfunc)
+				if idaapi.is_func(funcflags):
+					print(f" - Workaround successful. Please assure that {vtable:#x} is a vtable.")
+					workaround = True
+			
+			if not workaround:
+				print(" - Workaround failed. Skipping...")
+				continue
+
+		name = idaapi.get_name(ea)
+		if not workaround and (not name or not name.startswith("??_R4")):
+			print(f"[VTABLE IO] Invalid name at {ea:#x}. Possible unwind info. Ignoring...")
+			continue
+
+		# In 64-bit PEs, the COL references itself, remove this
+		refs = list(idautils.XrefsTo(ea))
+		if idc.__EA64__:
+			for n in range(len(refs)-1, -1, -1):
+				if refs[n].frm == ea + RTTICompleteObjectLocator.pSelf.offset:
+					del refs[n]
+
+		# Now that we have the COL, we can use it to find the vtable that utilizes it and its thisoffs
+		# We need to use this later because of overloads so we cache it in a list
+		if len(refs) != 1:
+			print(f"[VTABLE IO] Multiple vtables point to same COL - {name} at {ea:#x}")
+			continue
+
+		cols.append(ea)
+		vtable = refs[0].frm + ctypes.sizeof(ea_t)
+		vtables.append(vtable)
+
+	# Can have RTTI without a vtable
+	tis[classname] = WinTI(typedesc, classname, cols, vtables)
+
+
 def read_ti_win():
 	# Step 1, get the vftable of type_info
 	type_info = idc.get_name_ea_simple("??_7type_info@@6B@")
 	if type_info is None:
 		print("[VTABLE IO] type_info not found. Are you sure you're in a C++ binary?")
-		return
+		return None
 	
 	tis = {}
 
 	# Step 2, get all xrefs to type_info
 	# Get type descriptor
 	for typedesc in idautils.XrefsTo(type_info):
-		ea = typedesc.frm
-		if idaapi.get_func(ea) is not None:
-			continue
+		parse_ti(typedesc.frm, tis)
 
-		try:
-			classname = idaapi.demangle_name(idc.get_name(ea), SHORTDN)
-			classname = classname.removeprefix("class ")
-			classname = classname.removesuffix(" `RTTI Type Descriptor'")
-		except:
-			print(f"[VTABLE IO] Invalid vtable name at {ea:#x}")
-			continue
-
-		cols = []
-		vtables = []
-
-		# Then figure out which xref is a/the COL
-		for xref in idautils.XrefsTo(typedesc.frm):
-			ea = xref.frm
-
-			# Dynamic cast
-			func = idaapi.get_func(ea)
-			if func is not None:
-				continue
-
-			name = idaapi.get_name(ea)
-			# Class type descriptor and random global data
-			# Kind of a hack but let's assume no one will rename these
-			if name and (name.startswith("??_R1") or name.startswith("off_")):
-				continue
-
-			ea -= 4
-			name = idaapi.get_name(ea)
-			# Catchable types
-			if name and name.startswith("__CT"):
-				continue
-
-			# COL
-			ea -= 8
-			workaround = False
-			if idaapi.is_unknown(idaapi.get_full_flags(ea)):
-				print(f"[VTABLE IO] Possible COL is unknown at {ea:#x}. This may be an unreferenced vtable. Trying workaround...")
-				# This might be a bug with IDA, but sometimes the COL isn't analyzed
-				# If there's still a reference, then we can still trace back
-				# If there is a list of functions (or even just one), then it's probably a vtable, 
-				# but we'll still warn the user that it might be garbage
-				refs = list(idautils.XrefsTo(ea))
-				if len(refs) == 1:
-					vtable = refs[0].frm + ctypes.sizeof(ea_t)
-					tryfunc = get_ptr(vtable + ctypes.sizeof(ea_t))
-					func = idaapi.get_func(tryfunc)
-					if func is not None:
-						print(f" - Workaround successful. Please assure that {vtable:#x} is a vtable.")
-						workaround = True
-				
-				if not workaround:
-					print(" - Workaround failed. Skipping...")
-					continue
-
-			name = idaapi.get_name(ea)
-			if not workaround and (not name or not name.startswith("??_R4")):
-				print(f"[VTABLE IO] Invalid name at {ea:#x}. Possible unwind info. Ignoring...")
-				continue
-
-			# In 64-bit PEs, the COL references itself, remove this
-			refs = list(idautils.XrefsTo(ea))
-			if idc.__EA64__:
-				for n in range(len(refs)-1, -1, -1):
-					if refs[n].frm == ea + RTTICompleteObjectLocator.pSelf.offset:
-						del refs[n]
-
-			# Now that we have the COL, we can use it to find the vtable that utilizes it and its thisoffs
-			# We need to use this later because of overloads so we cache it in a list
-			if len(refs) != 1:
-				print(f"[VTABLE IO] Multiple vtables point to same COL - {name} at {ea:#x}")
-				continue
-
-			cols.append(ea)
-			vtable = refs[0].frm + ctypes.sizeof(ea_t)
-			vtables.append(vtable)
-
-		# Can have RTTI without a vtable
-		tis[classname] = WinTI(typedesc.frm, classname, cols, vtables)
+	# In some cases, the IDA either fails to reference some type descriptors with type_info
+	# Not exactly sure why, but it lists the ea of type_info as a "hash" when in reality it isn't
+	# A workaround for this is to parse type descriptor strings (".?AV*"), load up their references, and 
+	# walk backwards to the start of what is supposed to be the type descriptor, and assure that
+	# its DWORD is the type_info vtable
+	# We also make this an optional feature because it's slow in older IDA versions and not necessarily needed
+	# I only found this to be a problem in NMRIH, so it appears to be rare
+	if VOPTIONS.cImportOptions & VOptions.StringMethod:
+		WAITBOX.show("Performing string parsing")
+		string_method(type_info, tis)
 	
 	return tis
+
+def string_method(type_info, tis):
+	for string in idautils.Strings():
+		sstr = str(string)
+		if not sstr.startswith(".?AV"):
+			continue
+
+		ea = string.ea
+		ea -= TypeDescriptor.name.offset
+		trytinfo = rva_to_ea(idaapi.get_wide_dword(ea))
+		# This is a weird string that isn't a part of a type descriptor
+		if trytinfo != type_info:
+			continue
+
+		parse_ti(ea, tis)
+
 
 def parse_vtables(vtables):
 	jsondata = {}
@@ -567,32 +683,108 @@ def is_thunk(thunkfunc, targetfuncs):
 
 	return False
 
-def build_export_table(linlist, winlist):
-	instance = (int, long) if version_info[0] < 3 else int
-	for i, v in enumerate(linlist):
-		if isinstance(v, instance):
-			linlist = linlist[:i]		# Skipping thisoffs
-			break
-
-	listnode = linlist[:]
-
-	for i, v in enumerate(linlist):
-		name = str(v)
-		if name.startswith("__cxa"):
-			listnode[i] = None
+def build_export_table(linuxtables, wintables):
+	exporttable = {}
+	# Save Linux only tables for exporting too
+	winless = {k: linuxtables[k] for k in linuxtables.keys() - wintables.keys()}
+	global EXPORTS
+	for classname, wintable in wintables.items():
+		linuxtable = linuxtables.get(classname, None)
+		if linuxtable is None:
 			continue
 
-		s = "L{:<6}".format(i)
-		try:
-			s += " W{}".format(winlist.index(name))
-		except:
-			pass
+		# Sort and int-ify Linux again
+		newlinuxtable = [(abs(int(k)), v) for k, v in linuxtable.items()]
+		newlinuxtable.sort(key=lambda x: x[0])
 
-		funcname = idc.demangle_name(name, SHORTDN)
-		s = "{:<16} {}".format(s, funcname)
-		listnode[i] = s
+		exportnode = []
+		purecalls = []
+		for currlinuxitems, currwinitems in zip(newlinuxtable, wintable.items()):
+			lthisoffs, ltable = currlinuxitems
+			wthisoffs, wtable = currwinitems
 
-	return [i for i in listnode if i != None]
+			windiscovered = set()
+			prepend = f"[L{lthisoffs}/W{wthisoffs}]"
+			for i, mangledname in enumerate(ltable):
+				# Save for later
+				if mangledname.startswith("__cxa"):
+					# print(f"Found purecall {classname}::{mangledname} at {i}")
+					purecalls.append(i)
+					continue
+
+				winidx = -1
+				for j, winfunc in enumerate(wtable):
+					if mangledname == winfunc.mangledname:
+						winidx = j
+						windiscovered.add(j)
+						break
+
+				s = f"L{i}"
+				if winidx != -1:
+					s = f"{s:<8}W{winidx}"
+
+				shortname = idaapi.demangle_name(mangledname, idaapi.MNG_SHORT_FORM) or "purecall"
+				newprepend = f"{prepend:<20}{s:<8}"
+				s = f"{newprepend:<36}{shortname}"
+				exportnode.append(s)
+
+			# Purecalls are a bit special
+			# We can't just grab the Linux index and use it for Windows
+			# So we 1: do this after everything else is done, and 2: find the first
+			# Windows purecall after the last purecall we found for each one
+			# in the Linux table
+			# This is kinda hard to test edge cases, but we'll assume this works
+			lastidx = 0
+			for i in purecalls:
+				winidx = -1
+				for j, winfunc in enumerate(wtable[lastidx:]):
+					if winfunc.mangledname == "__cxa_pure_virtual":
+						winidx = j + lastidx
+						break
+
+				s = f"L{i}"
+				if winidx != -1:
+					s = f"{s:<8}W{winidx}"
+
+				shortname = idaapi.demangle_name(mangledname, idaapi.MNG_SHORT_FORM) or "purecall"
+				newprepend = f"{prepend:<20}{s:<8}"
+				s = f"{newprepend:<36}{shortname}"
+				exportnode.insert(i, s)
+				lastidx = winidx+1
+				windiscovered.add(winidx)
+
+			# For thunks, figure out which Windows indices were not discovered and add them
+			# Inherited table might be out of order but we favor Linux anyways
+			for j, winfunc in enumerate(wtable):
+				if j not in windiscovered:
+					dummy = ""
+					s = f"W{j}"
+
+					shortname = idaapi.demangle_name(winfunc.mangledname, idaapi.MNG_SHORT_FORM) or "purecall"
+					newprepend = f"{prepend:<20}{dummy:<8}{s:<8}"
+					s = f"{newprepend:<36}{shortname}"
+					exportnode.append(s)
+
+		EXPORTS += 1
+		exporttable[classname] = exportnode
+
+	# Export Linux only tables
+	for classname, linuxtable in winless.items():
+		# Sort and int-ify Linux again
+		newlinuxtable = [(abs(int(k)), v) for k, v in linuxtable.items()]
+		newlinuxtable.sort(key=lambda x: x[0])
+		exportnode = []
+		for thisoffs, table in newlinuxtable:
+			prepend = f"[L{thisoffs}]"
+			for i, mangledname in enumerate(table):
+				shortname = idaapi.demangle_name(mangledname, idaapi.MNG_SHORT_FORM) or "purecall"
+				newprepend = f"{prepend:<20}L{i:<8}"
+				s = f"{newprepend:<36}{shortname}"
+				exportnode.append(s)
+
+		EXPORTS += 1
+		exporttable[classname] = exportnode
+	return exporttable
 
 def read_vtables_win(classname, ti, wintable, baseclasses):
 	if classname in wintable.keys():
@@ -625,18 +817,17 @@ def read_tinfo_win(classname, ti, winti, wintable, baseclasses):
 		hierarchydesc = get_class_from_ea(RTTIClassHierarchyDescriptor, rva_to_ea(col.pClassHierarchyDescriptor))
 		numitems = hierarchydesc.numBaseClasses
 		arraystart = rva_to_ea(hierarchydesc.pBaseClassArray)
-		print(hex(arraystart), numitems)
 
 		# Go backwards because we should start parsing from the basest base class
 		for i in range(numitems - 1, -1, -1):
 			offset = arraystart + i * ctypes.sizeof(ctypes.c_uint32)
 			descea = rva_to_ea(idaapi.get_wide_dword(offset))
-			parentname = idaapi.demangle_name(idaapi.get_name(descea), SHORTDN)
+			parentname = idaapi.demangle_name(idaapi.get_name(descea), idaapi.MNG_SHORT_FORM)
 			if not parentname:
 				# Another undefining IDA moment
 #				print(f"[VTABLE IO] Invalid parent name at {offset:#x}")
 				typedesc = rva_to_ea(idaapi.get_wide_dword(descea))
-				parentname = idaapi.demangle_name(idaapi.get_name(typedesc), SHORTDN)
+				parentname = idaapi.demangle_name(idaapi.get_name(typedesc), idaapi.MNG_SHORT_FORM)
 
 				# Should be impossible since this is the type descriptor
 				if not parentname:
@@ -644,6 +835,7 @@ def read_tinfo_win(classname, ti, winti, wintable, baseclasses):
 					continue
 
 				parentname = parentname.removeprefix("class ")
+				parentname = parentname.removeprefix("struct TypeDescriptor ")
 				parentname = parentname.removesuffix(" `RTTI Type Descriptor'")
 			else:
 				parentname = parentname[:parentname.find("::`RTTI Base Class Descriptor")]
@@ -704,11 +896,29 @@ def fix_win_overloads(linuxitems, winitems, vclass, functable):
 		vfuncs = []
 		for u in range(len(currfuncs)):
 			f = make_vfunc(mangledname=currfuncs[u])
-			pname = f.postname
-			for baseclass in vclass.baseclasses.values():
-				if pname in baseclass.postnames:
-					f.inherited = True
+			for j, baseclass in enumerate(vclass.baseclasses.values()):
+				if f.postname in baseclass.postnames:
+					f.inheritid = j
 					break
+
+				# Unbelievable hack right here
+				# Looks like pointers are getting shoved next to their types instead of spaced sometimes
+				# Not entirely sure what causes this.
+				# CAI_BaseNPC::CanStandOn(CBaseEntity*) vs CBaseEntity::CanStandOn(CBaseEntity *)
+				# Maybe it's the difference in the types of the pointers and this?
+				trystr = f.postname
+				breakout = False
+				for k in range(trystr.count(" *")):
+					trystr = trystr.replace(" *", "*", 1)
+					if trystr in baseclass.postnames:
+						f.inheritid = j
+						f.postname = trystr
+						breakout = True
+						break
+
+				if breakout:
+					break
+
 			vfuncs.append(f)
 
 		# Remove Linux's extra dtor
@@ -722,9 +932,6 @@ def fix_win_overloads(linuxitems, winitems, vclass, functable):
 		u = 0
 		while u < len(vfuncs):
 			f = vfuncs[u]
-			if f.inherited:
-				u += 1
-				continue
 
 			if f.mangledname.startswith("__cxa"):# or f.mangledname.startswith("_ZThn") or f.mangledname.startswith("_ZTv"):
 				u += 1
@@ -745,6 +952,13 @@ def fix_win_overloads(linuxitems, winitems, vclass, functable):
 
 				if firstidx == -1:
 					print(f"[VTABLE IO] An impossibility has occurred. \"{f.sname}\" ({f.mangledname}, {f.name}) is in funcnameset but there is no possible overload.")
+
+				overloadfunc = vfuncs[firstidx]
+				if overloadfunc.inheritid != f.inheritid:
+					# Although this function is an overload, it was created in a subclass
+					# So we don't move it
+					u += 1
+					continue
 
 				# Remove the current func from the list
 				del vfuncs[u]
@@ -831,18 +1045,9 @@ def prep_linux_vtables(linuxitems, winitems, vclass):
 
 	# No thunks, we are done
 	if min(len(linuxitems), len(winitems)) == 1:
-		if len(functable[0]) != len(winitems[0].funcs):
-			print(f"[VTABLE IO] WARNING: {vclass.name} vtable may be wrong! L{len(functable[0])} - W{len(winitems[0].funcs)} = {len(functable[0]) - len(winitems[0].funcs)}")
 		return functable
-	
-	thunk_dance(winitems, vclass, functable)
 
-	# Check for any size mismatches
-	for items in zip(functable.items(), winitems):
-		currlinuxitems, currwinitems = items
-		thisoffs, ltable = currlinuxitems
-		if len(ltable) != len(currwinitems.funcs):
-			print(f"[VTABLE IO] WARNING: {vclass.name} vtable [W{currwinitems.thisoffs}/L{thisoffs}] may be wrong! L{len(ltable)} - W{len(currwinitems.funcs)} = {len(ltable) - len(currwinitems.funcs)}")
+	thunk_dance(winitems, vclass, functable)
 
 	# Ready to write
 	return functable
@@ -860,7 +1065,7 @@ def merge_tables(functable, winitems):
 			if targetname.startswith("__cxa"):
 				continue
 
-			# Size mismatch, ignore it
+			# Size mismatch, skip it
 			try:
 				currfunc = wtable[i]
 			except:
@@ -870,6 +1075,16 @@ def merge_tables(functable, winitems):
 			flags = idaapi.get_full_flags(targetaddr)
 			# Already typed
 			if idaapi.has_name(flags):
+				if VOPTIONS.cImportOptions & VOptions.CommentReusedFunctions:
+					# If it's a Windows optimization (nullsubs, etc),
+					# add a comment with the actual name
+					# There's gotta be a way to rename the reference but not the function
+					currmangledname = idaapi.get_name(targetaddr)
+					currname = idaapi.demangle_name(currmangledname, idaapi.MNG_LONG_FORM)
+					if not currname or currname != f.name:
+						# Use short name for cmt since that's what IDA uses
+						shortname = idaapi.demangle_name(f.mangledname, idaapi.MNG_SHORT_FORM)
+						idaapi.set_cmt(currfunc.vaddr, shortname, False)
 				continue
 
 			func = idaapi.get_func(targetaddr)
@@ -886,6 +1101,7 @@ def merge_tables(functable, winitems):
 			FUNCS += 1
 
 def compare_tables(wintables, linuxtables):
+	functables = {}
 	for classname, vclass in wintables.items():
 		if not vclass.vfuncs:
 			continue
@@ -920,40 +1136,64 @@ def compare_tables(wintables, linuxtables):
 
 		functable = prep_linux_vtables(linuxitems, winitems, vclass)
 
+		skip = False
+		for items in zip(functable.items(), winitems):
+			currlinuxitems, currwinitems = items
+			thisoffs, ltable = currlinuxitems
+			if len(ltable) != len(currwinitems.funcs):
+				print(f"[VTABLE IO] WARNING: {vclass.name} vtable [W{currwinitems.thisoffs}/L{thisoffs}] may be wrong! L{len(ltable)} - W{len(currwinitems.funcs)} = {len(ltable) - len(currwinitems.funcs)}", end="")
+				if VOPTIONS.cImportOptions & VOptions.SkipMismatches:
+					print(". Skipping...")
+					skip = True
+					break
+				else:
+					print()
+
+		if skip:
+			continue
+
+		functables[classname] = functable
+
 		# Write!
-		merge_tables(functable, winitems)
+		if VOPTIONS.cExportOptions != VOptions.ExportOnly:
+			merge_tables(functable, winitems)
+
+	return functables
 
 def write_vtables():
-	importfile = idaapi.ask_file(0, "*.json", "Select a file to import from")
-	if not importfile:
+	WAITBOX.show("Importing file")
+	linuxtables = None
+	try:
+		with open(VOPTIONS.iFileImport) as f:
+			linuxtables = json.load(f)
+	except FileNotFoundError as e:
+		print(f"[VTABLE IO] File {VOPTIONS.iFileImport} not found.")
 		return
 
-# 	global EXPORT_MODE
-# 	EXPORT_MODE = idaapi.ask_buttons("Yes", "Export only (do not type functions)", "No", -1, "Would you like to export virtual tables to a file?")
-
-# 	if EXPORT_MODE in (Export_Yes, Export_YesOnly):
-# 		exportfile = idaapi.ask_file(1, "*.json", "Select a file to export virtual tables to")
-# 		if not exportfile:
-# 			return
-
-	WAITBOX.show("Importing file")
-	with open(importfile) as f:
-		linuxtables = json.load(f)
+	if not linuxtables:
+		return
 
 	WAITBOX.show("Parsing Windows typeinfo")
 	winti = read_ti_win()
+	if winti is None:
+		return
 
 	WAITBOX.show("Generating windows vtables")
-	print("gen")
 	wintables = gen_win_tables(winti)
 
 	WAITBOX.show("Comparing vtables")
-	compare_tables(wintables, linuxtables)
+	functables = compare_tables(wintables, linuxtables)
 
-	# if EXPORT_MODE in (Export_Yes, Export_YesOnly):
-	# 	WAITBOX.show("Writing to file")
-	# 	with open(exportfile, "w") as f:
-	# 		json.dump(EXPORT_TABLE, f, indent=4, sort_keys=True)
+	if VOPTIONS.cExportOptions in (VOptions.ExportOnly, VOptions.ExportNormal):
+		if VOPTIONS.iFileExport is None or VOPTIONS.iFileExport == "*.json":
+			print("[VTABLE IO] No export file specified.")
+			return
+
+		WAITBOX.show("Writing to file")
+		exporttable = build_export_table(linuxtables, functables)
+		with open(VOPTIONS.iFileExport, "w") as f:
+			json.dump(exporttable, f, indent=4, sort_keys=True)
+
 
 def main():
 	os = get_os()
@@ -967,11 +1207,21 @@ def main():
 			read_vtables_linux()
 			print("Done!")
 		elif os == OS_Win:
+			global VOPTIONS
+			VOPTIONS = VForm.init_options()
+			if not VOPTIONS:
+				return
+			
 			write_vtables()
 			if FUNCS:
-				print("Successfully typed {} virtual functions".format(FUNCS))
+				print(f"[VTABLE IO] Successfully typed {FUNCS} virtual functions")
 			else:
-				print("No functions were typed")
+				print("[VTABLE IO] No functions were typed")
+
+			if EXPORTS:
+				print(f"[VTABLE IO] Successfully exported {EXPORTS} virtual tables")
+			
+			if FUNCS == 0 and EXPORTS == 0:
 				idaapi.beep()
 	except:
 		import traceback

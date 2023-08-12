@@ -5,3 +5,4 @@ form_test.py
 *.bak
 capdisasm.py
 vtest*
+namecollisions.py
