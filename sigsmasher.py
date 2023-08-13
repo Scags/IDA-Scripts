@@ -200,7 +200,7 @@ def main():
 		f += ".yml"
 
 	with open(f, "w") as f:
-		yaml.safe_dump(root, f, default_flow_style = False, width = 999999)
+		yaml.safe_dump(root, f, default_flow_style=False, width=999999)
 
 	idaapi.hide_wait_box()
 	print("Successfully generated {} signatures from {} functions".format(sigcount, funccount))

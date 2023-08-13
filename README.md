@@ -25,10 +25,13 @@ Takes a SourceMod (or any) signature input and detects if it's unique or not.
 
 Python translation of [makesig](https://github.com/alliedmodders/sourcemod/blob/master/tools/ida_scripts/makesig.idc).
 
+Optionally, install pyperclip with `pip install pyperclip` to automatically copy any signatures to your clipboard when running.
+
 
 ### makesigfromhere.py ###
 
 Creates a signature from the cursor offset. Useful for byte patching.
+
 
 ### nameresetter.py ###
 
@@ -71,9 +74,40 @@ This works well with the Signature Smasher. However to save you an hour or so, I
 
 ### vtable_io.py ###
 
-Imports and exports virtual tables. Run it through a Linux binary to export to a file, then run it through a Windows binary to import those VTables into the database. This is similar to [Asherkin's VTable Dumper](https://asherkin.github.io/vtable/) but doesn't suffer from the pitfalls of multiple inheritance. Since it doesn't have those liabilities, it's function typing will almost always be perfect. 32-bit only for now.
+Imports and exports virtual tables. Run it through a Linux binary to export to a file, then run it through a Windows binary to import those VTables into the database. This is similar to [Asherkin's VTable Dumper](https://asherkin.github.io/vtable/) but doesn't suffer from the pitfalls of multiple inheritance. Since it doesn't have those liabilities, its function typing will almost always be perfect.
 
-Only works on libraries that have virtual thunks *after* the virtual table declaration such as in TF2. Fixing this is a TODO.
+#### Features ####
+This script is slightly heavy and has features that warrant explanation. Features can be freely enabled/disabled in the popup form that opens when you run the script. Desired features options are kept in the IDA registry and will persist.
+
+**Parse type strings**
+- Sometimes IDA fails to properly analyze Windows RTTI Type Descriptor objects. Because of this, there won't be a reference from certain type descriptors to std::type_info, which is required for the script to work.
+- If this feature is enabled, then the string names of the type descriptor will be parsed in order to discover the unreferencing type descriptors. This will be done alongside the normal script function.
+- If you notice that there are multiple functions of the same name or classes that have virtual functions that aren't typed, consider enabling this.
+- It should be harmless to keep on regardless, but it is disabled by default.
+- This problem only seemed to be present in NMRiH.
+
+**Skip vtable size mismatches**
+- The script is *almost* perfect. On rare occasion, it will fail to properly prepare a Windows translation of a Linux virtual table.
+- If this option is enabled, then any size mismatches will forego function typing.
+- Enabled by default.
+
+**Comment reused functions**
+- Windows oftentimes optimizes shorter and simpler functions and reuses them across multiple virtual tables. This means that it would be redundant to rename these functions over and over again.
+- If enabled, virtual table declarations instead emplace a comment on the function's reference.
+- Enabled by default.
+
+**Export options**
+- Should be self-explanatory, but the script is able to export the Linux and Windows virtual tables to a file.
+- This is is a .json file and is organized to be readable.
+- The format of the export file is as follows:
+```json
+"classname"
+{
+	"[this-offset]	vtable-offset	function-name"
+}
+```
+- Linux offsets are denoted with `L` and Windows with `W`. If the function is not present in a certain OS, then that index is empty.
+- Exporting is optional, and if it is not enabled, then the export file path option can be safely ignored.
 
 ### vtable_structs.py ###
 

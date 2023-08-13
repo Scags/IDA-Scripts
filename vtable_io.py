@@ -5,26 +5,25 @@ import json
 import ctypes
 import time
 import re
-import os
 
-from sys import version_info
 from dataclasses import dataclass
 
 if idc.__EA64__:
 	ea_t = ctypes.c_uint64
 	ptr_t = ctypes.c_int64
 	get_ptr = idaapi.get_qword
-	# Calling this a lot so we'll speed up the invocations by manually implementing this here
-	def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == idaapi.FF_QWORD
+	FF_PTR = idaapi.FF_QWORD
 else:
 	ea_t = ctypes.c_uint32
 	ptr_t = ctypes.c_int32
 	get_ptr = idaapi.get_dword
-	def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == idaapi.FF_DWORD
+	FF_PTR = idaapi.FF_DWORD
 
-def is_off(f): return f & (idaapi.FF_0OFF|idaapi.FF_1OFF) != 0
+# Calling these a lot so we'll speed up the invocations by manually implementing them here
+def is_off(f): return (f & (idaapi.FF_0OFF|idaapi.FF_1OFF)) != 0
 def is_code(f): return (f & idaapi.MS_CLS) == idaapi.FF_CODE
 def has_any_name(f): return (f & idaapi.FF_ANYNAME) != 0
+def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == FF_PTR
 
 # Let's go https://www.blackhat.com/presentations/bh-dc-07/Sabanal_Yason/Paper/bh-dc-07-Sabanal_Yason-WP.pdf
 
@@ -245,16 +244,17 @@ class VFunc:
 	postname: str
 	sname: str
 
-def make_vfunc(ea=idc.BADADDR, mangledname="", inheritid=-1, vaddr=idc.BADADDR):
-	name = ""
-	postname = ""
-	sname = ""
-	if mangledname:
-		name = idaapi.demangle_name(mangledname, idaapi.MNG_LONG_FORM) or mangledname
-		if name:
-			postname = get_func_postname(name)
-			sname = postname.split("(")[0]
-	return VFunc(ea, vaddr, mangledname, inheritid, name, postname, sname)
+	@staticmethod
+	def create(ea=idc.BADADDR, mangledname="", inheritid=-1, vaddr=idc.BADADDR):
+		name = ""
+		postname = ""
+		sname = ""
+		if mangledname:
+			name = idaapi.demangle_name(mangledname, idaapi.MNG_LONG_FORM) or mangledname
+			if name:
+				postname = get_func_postname(name)
+				sname = postname.split("(")[0]
+		return VFunc(ea, vaddr, mangledname, inheritid, name, postname, sname)
 
 class VOptions(object):
 	StringMethod = 1 << 0
@@ -412,7 +412,7 @@ def parse_vtable_addresses(ea):
 		if not is_code(fflags):
 			break
 
-		funcs.append(make_vfunc(ea=offs, vaddr=ea))
+		funcs.append(VFunc.create(ea=offs, vaddr=ea))
 
 		ea = idaapi.next_head(ea, idc.BADADDR)
 	return funcs
@@ -684,6 +684,8 @@ def is_thunk(thunkfunc, targetfuncs):
 	return False
 
 def build_export_table(linuxtables, wintables):
+	# Table is built mainly for readability but having one that is actually parsable would
+	# be a cool idea for the future
 	exporttable = {}
 	# Save Linux only tables for exporting too
 	winless = {k: linuxtables[k] for k in linuxtables.keys() - wintables.keys()}
@@ -895,7 +897,7 @@ def fix_win_overloads(linuxitems, winitems, vclass, functable):
 		currfuncs = linuxitems[i].funcs
 		vfuncs = []
 		for u in range(len(currfuncs)):
-			f = make_vfunc(mangledname=currfuncs[u])
+			f = VFunc.create(mangledname=currfuncs[u])
 			for j, baseclass in enumerate(vclass.baseclasses.values()):
 				if f.postname in baseclass.postnames:
 					f.inheritid = j
