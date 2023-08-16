@@ -41,7 +41,6 @@ def checksig(sig):
 			# segments is fine
 			if endea == idc.BADADDR or endea < segstart + s.size():
 				endea = segstart + s.size()
-			break
 
 	count = 0
 	addr = 0
@@ -318,11 +317,5 @@ def main():
 			s += f"{value[0]:<12} {foundval:<12} {status:<12}"
 
 			print(s)
-
-#	if os == "windows" and kv.get("Offsets"):
-#		print("Offset checking is not supported on Windows binaries")
-
-#	idaapi.ask_form("Validated\nCheck console for output")
-	idaapi.beep()
 
 main()

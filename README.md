@@ -42,8 +42,6 @@ Resets the name of every function in IDA's database. Does not include library or
 
 Imports netprops and owner classes as structs and struct members into IDA's DB. Only works with the XML file provided by sm_dump_netprops_xml. Datatables only work most of the time. You should also use the proper netprop dump for your OS, or else you will be very confused.
 
-You also have the option of importing vtables from the found classes into IDA. This is a bit more sane than the **vtable_structs.py** script, but only works on classes with netprops.
-
 
 ### sigfind.py ###
 
@@ -55,7 +53,7 @@ Takes a SourceMod (or any) signature and jumps you to the function it's for. If 
 Makes SourceMod ready signatures for every function in IDA's database. Yes, this will take a long, long time. Requires PyYAML so you'll need to `pip install pyyaml`. You have the option of only generating signatures for typed functions so this works very well with the Symbol Smasher.
 
 
-### structaligner.py ###
+### structfiller.py ###
 
 Sanitizes undefined struct members as if IDA had parsed a header file. Each structure will have its undefined members replaced with a one-byte-sized member in order to prevent pseudocode from falling apart. Only makes sense to use it after running the netprop importer.
 

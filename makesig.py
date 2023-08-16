@@ -19,10 +19,10 @@ def is_good_sig(sig, mask):
 			# segments is fine
 			if endea == idc.BADADDR or endea < segstart + s.size():
 				endea = segstart + s.size()
-			break
 
 	count = 0
 	addr = 0
+	# Ever just deprecate something and provide 0 documentation on what to use instead?
 	addr = idaapi.find_binary(addr, endea, search, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while addr != idc.BADADDR:
 		count = count + 1

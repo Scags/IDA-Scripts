@@ -28,7 +28,6 @@ def is_good_sig(sig, mask):
 			# segments is fine
 			if endea == idc.BADADDR or endea < segstart + s.size():
 				endea = segstart + s.size()
-			break
 
 	count = 0
 	addr = 0
@@ -60,7 +59,8 @@ def is_good_sig(sig, mask):
 	# return count == 1
 
 def makesig(ea, sz=-1):
-	name = idc.get_name(ea, idaapi.GN_VISIBLE)
+	func = idaapi.get_func(ea)
+	name = idc.get_name(func.start_ea, idaapi.GN_VISIBLE)
 
 	sig = ""
 	mask = ""
@@ -124,7 +124,7 @@ def makesig(ea, sz=-1):
 
 	print("==================================================")
 	print(
-		f"Signature for {name}:\n"
+		f"Signature for {name} + {ea - func.start_ea} ({ea - func.start_ea:#x}):\n"
 		f"{'Mask:':<{align}} {mask}\n"
 		f"{'Bytes:':<{align}} {sig}\n"
 		f"{wildcarded}"

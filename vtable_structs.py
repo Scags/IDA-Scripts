@@ -13,15 +13,15 @@ if idc.__EA64__:
 	ea_t = ctypes.c_uint64
 	ptr_t = ctypes.c_int64
 	get_ptr = idaapi.get_qword
-	FF_PTR = idaapi.FF_QWORD
+	FF_PTR = idc.FF_QWORD
 else:
 	ea_t = ctypes.c_uint32
 	ptr_t = ctypes.c_int32
 	get_ptr = idaapi.get_dword
-	FF_PTR = idaapi.FF_DWORD
+	FF_PTR = idc.FF_DWORD
 
-def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == FF_PTR
-def is_off(f): return (f & (idaapi.FF_0OFF|idaapi.FF_1OFF)) != 0
+def is_ptr(f): return (f & idaapi.MS_CLS) == idc.FF_DATA and (f & idaapi.DT_TYPE) == FF_PTR
+def is_off(f): return (f & (idc.FF_0OFF|idc.FF_1OFF)) != 0
 
 
 _RTTICompleteObjectLocator_fields = [
@@ -117,40 +117,36 @@ def create_vmi_class_type_info(ea):
 	return vmi_class_type_info_dynamic
 
 # Idiot proof IDA wait box
-class WaitBox(object):
-	def __init__(self):
-		self.buffertime = 0.0
-		self.shown = False
-		self.msg = ""
+class WaitBox:
+	buffertime = 0.0
+	shown = False
+	msg = ""
 
-	def _show(self, msg):
-		self.msg = msg
-		if self.shown:
+	@staticmethod
+	def _show(msg):
+		WaitBox.msg = msg
+		if WaitBox.shown:
 			idaapi.replace_wait_box(msg)
 		else:
 			idaapi.show_wait_box(msg)
-			self.shown = True
+			WaitBox.shown = True
 
-	def show(self, msg, buffertime = 0.1):
-		if msg == self.msg:
+	@staticmethod
+	def show(msg, buffertime = 0.1):
+		if msg == WaitBox.msg:
 			return
 
 		if buffertime > 0.0:
-			if time.time() - self.buffertime < buffertime:
+			if time.time() - WaitBox.buffertime < buffertime:
 				return
-			self.buffertime = time.time()
-		self._show(msg)
+			WaitBox.buffertime = time.time()
+		WaitBox._show(msg)
 
-	def hide(self):
-		if self.shown:
+	@staticmethod
+	def hide():
+		if WaitBox.shown:
 			idaapi.hide_wait_box()
-			self.shown = False
-
-	# Dtor doesn't work? Lol idk
-	def __del__(self):
-		self.hide()
-
-WAITBOX = WaitBox()
+			WaitBox.shown = False
 STRUCTS = 0
 
 class InfoCache(object):
@@ -400,6 +396,9 @@ def calc_member_tinfo(vfunc):
 
 
 def create_structs(data):
+	# Now this is an awesome API function that we most certainly need
+	idaapi.begin_type_updating(idaapi.UTP_STRUCT)
+
 	for classname, vtables in data.items():
 		classstrucid = add_struc_ex(classname)
 		classstruc = idaapi.get_struc(classstrucid)
@@ -440,9 +439,6 @@ def create_structs(data):
 					continue
 
 				else:
-					# I sadly and simply cannot speed this up
-					# The time cost comes from adding members and setting tinfo
-					# Sorry :(
 					opinfo = idaapi.opinfo_t()
 					# I don't think this does anything
 					opinfo.ri.flags = idaapi.REF_OFF64 if idc.__EA64__ else idaapi.REF_OFF32
@@ -450,14 +446,14 @@ def create_structs(data):
 					opinfo.ri.base = 0
 					opinfo.ri.tdelta = 0
 
-					serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR, opinfo, ctypes.sizeof(ea_t))
+					serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF|idc.FF_1OFF, opinfo, ctypes.sizeof(ea_t))
 					# Failed, so there was either an invalid name or a name collision
 					if serr == idaapi.STRUC_ERROR_MEMBER_NAME:
 						targetname = idaapi.validate_name(targetname, idaapi.VNT_IDENT, idaapi.SN_IDBENC)
-						serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR, opinfo, ctypes.sizeof(ea_t))
+						serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF|idc.FF_1OFF, opinfo, ctypes.sizeof(ea_t))
 						if serr == idaapi.STRUC_ERROR_MEMBER_NAME:
 							targetname = f"{targetname}_{offs:x}"
-							serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR, opinfo, ctypes.sizeof(ea_t))
+							serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF|idc.FF_1OFF, opinfo, ctypes.sizeof(ea_t))
 
 					if serr != idaapi.STRUC_ERROR_MEMBER_OK:
 						print(vtablestruc, vtablestrucid)
@@ -471,7 +467,7 @@ def create_structs(data):
 
 			vmember = idaapi.get_member(classstruc, thisoffs)
 			if not vmember:
-				if idaapi.add_struc_member(classstruc, f"vftbl{postfix}", thisoffs, FF_PTR, None, ctypes.sizeof(ea_t)) == idaapi.STRUC_ERROR_MEMBER_OK:
+				if idaapi.add_struc_member(classstruc, f"vftbl{postfix}", thisoffs, idc.FF_DATA|FF_PTR, None, ctypes.sizeof(ea_t)) == idaapi.STRUC_ERROR_MEMBER_OK:
 					global STRUCTS
 					STRUCTS += 1
 					tinfo = idaapi.tinfo_t()
@@ -481,7 +477,7 @@ def create_structs(data):
 						idaapi.set_member_tinfo(classstruc, mem, 0, tinfo, 0)
 
 def read_vtables_linux():
-	WAITBOX.show("Parsing typeinfo")
+	WaitBox.show("Parsing typeinfo")
 
 	# Step 1 and 2, crawl xrefs and stick the inherited class type infos into a structure
 	# After this, we can run over the xrefs again and see which xrefs come from another structure
@@ -509,7 +505,7 @@ def read_vtables_linux():
 		return
 
 	# Step 3, crawl xrefs to again and if the xref is not in the type info structure, then it's a vtable
-	WAITBOX.show("Discovering vtables")
+	WaitBox.show("Discovering vtables")
 	vtables = {}
 	get_tinfo_vtables(tinfo, xreftinfos, vtables)
 	get_tinfo_vtables(tinfo_pointer, xreftinfos, vtables)
@@ -517,10 +513,10 @@ def read_vtables_linux():
 	get_tinfo_vtables(tinfo_vmi, xreftinfos, vtables)
 
 	# Now, we have a list of vtables and their respective classes
-	WAITBOX.show("Parsing vtables")
+	WaitBox.show("Parsing vtables")
 	data = parse_vtables(vtables)
 
-	WAITBOX.show("Creating structs")
+	WaitBox.show("Creating structs")
 	create_structs(data)
 
 def parse_ti(ea, tis):
@@ -645,19 +641,19 @@ def read_ti_win():
 	# walk backwards to the start of what is supposed to be the type descriptor, and assure that
 	# its DWORD is the type_info vtable
 	# I only found this to be a problem in NMRIH, so it appears to be rare
-	WAITBOX.show("Performing string parsing")
+	WaitBox.show("Performing string parsing")
 	string_method(type_info, vtabledata)
 	
 	return vtabledata
 
 def read_vtables_win():
-	WAITBOX.show("Parsing Windows typeinfo")
+	WaitBox.show("Parsing Windows typeinfo")
 	data = read_ti_win()
 
 	if data is None:
 		return
 
-	WAITBOX.show("Creating structs")
+	WaitBox.show("Creating structs")
 	create_structs(data)
 
 def main():
@@ -682,8 +678,9 @@ def main():
 		print("Please file a bug report with supporting information at https://github.com/Scags/IDA-Scripts/issues")
 		idaapi.beep()
 
-	WAITBOX.hide()
+	idaapi.end_type_updating(idaapi.UTP_STRUCT)
+	WaitBox.hide()
 
-import cProfile
-cProfile.run("main()", "vtable_structs.prof")
-#main()
+# import cProfile
+# cProfile.run("main()", "vtable_structs.prof")
+main()

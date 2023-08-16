@@ -12,18 +12,18 @@ if idc.__EA64__:
 	ea_t = ctypes.c_uint64
 	ptr_t = ctypes.c_int64
 	get_ptr = idaapi.get_qword
-	FF_PTR = idaapi.FF_QWORD
+	FF_PTR = idc.FF_QWORD
 else:
 	ea_t = ctypes.c_uint32
 	ptr_t = ctypes.c_int32
 	get_ptr = idaapi.get_dword
-	FF_PTR = idaapi.FF_DWORD
+	FF_PTR = idc.FF_DWORD
 
 # Calling these a lot so we'll speed up the invocations by manually implementing them here
-def is_off(f): return (f & (idaapi.FF_0OFF|idaapi.FF_1OFF)) != 0
-def is_code(f): return (f & idaapi.MS_CLS) == idaapi.FF_CODE
-def has_any_name(f): return (f & idaapi.FF_ANYNAME) != 0
-def is_ptr(f): return (f & idaapi.MS_CLS) == idaapi.FF_DATA and (f & idaapi.DT_TYPE) == FF_PTR
+def is_off(f): return (f & (idc.FF_0OFF|idc.FF_1OFF)) != 0
+def is_code(f): return (f & idaapi.MS_CLS) == idc.FF_CODE
+def has_any_name(f): return (f & idc.FF_ANYNAME) != 0
+def is_ptr(f): return (f & idaapi.MS_CLS) == idc.FF_DATA and (f & idaapi.DT_TYPE) == FF_PTR
 
 # Let's go https://www.blackhat.com/presentations/bh-dc-07/Sabanal_Yason/Paper/bh-dc-07-Sabanal_Yason-WP.pdf
 
@@ -157,38 +157,36 @@ class FuncList:
 	funcs: list#[VFunc]
 
 # Idiot proof IDA wait box
-class WaitBox(object):
-	def __init__(self):
-		self.buffertime = 0.0
-		self.shown = False
-		self.msg = ""
+class WaitBox:
+	buffertime = 0.0
+	shown = False
+	msg = ""
 
-	def _show(self, msg):
-		self.msg = msg
-		if self.shown:
+	@staticmethod
+	def _show(msg):
+		WaitBox.msg = msg
+		if WaitBox.shown:
 			idaapi.replace_wait_box(msg)
 		else:
 			idaapi.show_wait_box(msg)
-			self.shown = True
+			WaitBox.shown = True
 
-	def show(self, msg, buffertime = 0.1):
-		if msg == self.msg:
+	@staticmethod
+	def show(msg, buffertime = 0.1):
+		if msg == WaitBox.msg:
 			return
 
 		if buffertime > 0.0:
-			if time.time() - self.buffertime < buffertime:
+			if time.time() - WaitBox.buffertime < buffertime:
 				return
-			self.buffertime = time.time()
-		self._show(msg)
+			WaitBox.buffertime = time.time()
+		WaitBox._show(msg)
 
-	def hide(self):
-		if self.shown:
+	@staticmethod
+	def hide():
+		if WaitBox.shown:
 			idaapi.hide_wait_box()
-			self.shown = False
-
-	# Dtor doesn't work? Lol idk
-	def __del__(self):
-		self.hide()
+			WaitBox.shown = False
 
 # Virtual class tree
 class VClass(object):
@@ -324,7 +322,6 @@ OS_Win = 1
 FUNCS = 0
 EXPORTS = 0
 
-WAITBOX = WaitBox()
 VOPTIONS = None
 
 def get_os():
@@ -464,7 +461,7 @@ def read_vtables_linux():
 	if not f:
 		return
 		
-	WAITBOX.show("Parsing typeinfo")
+	WaitBox.show("Parsing typeinfo")
 
 	# Step 1 and 2, crawl xrefs and stick the inherited class type infos into a structure
 	# After this, we can run over the xrefs again and see which xrefs come from another structure
@@ -492,7 +489,7 @@ def read_vtables_linux():
 		return
 
 	# Step 3, crawl xrefs to again and if the xref is not in the type info structure, then it's a vtable
-	WAITBOX.show("Discovering vtables")
+	WaitBox.show("Discovering vtables")
 	vtables = {}
 	get_tinfo_vtables(tinfo, xreftinfos, vtables)
 	get_tinfo_vtables(tinfo_pointer, xreftinfos, vtables)
@@ -500,10 +497,10 @@ def read_vtables_linux():
 	get_tinfo_vtables(tinfo_vmi, xreftinfos, vtables)
 
 	# Now, we have a list of vtables and their respective classes
-	WAITBOX.show("Parsing vtables")
+	WaitBox.show("Parsing vtables")
 	jsondata = parse_vtables(vtables)
 
-	WAITBOX.show("Writing to file")
+	WaitBox.show("Writing to file")
 	with open(f, "w") as f:
 		json.dump(jsondata, f, indent=4, sort_keys=True)
 
@@ -619,7 +616,7 @@ def read_ti_win():
 	# We also make this an optional feature because it's slow in older IDA versions and not necessarily needed
 	# I only found this to be a problem in NMRIH, so it appears to be rare
 	if VOPTIONS.cImportOptions & VOptions.StringMethod:
-		WAITBOX.show("Performing string parsing")
+		WaitBox.show("Performing string parsing")
 		string_method(type_info, tis)
 	
 	return tis
@@ -1163,7 +1160,7 @@ def compare_tables(wintables, linuxtables):
 	return functables
 
 def write_vtables():
-	WAITBOX.show("Importing file")
+	WaitBox.show("Importing file")
 	linuxtables = None
 	try:
 		with open(VOPTIONS.iFileImport) as f:
@@ -1175,15 +1172,15 @@ def write_vtables():
 	if not linuxtables:
 		return
 
-	WAITBOX.show("Parsing Windows typeinfo")
+	WaitBox.show("Parsing Windows typeinfo")
 	winti = read_ti_win()
 	if winti is None:
 		return
 
-	WAITBOX.show("Generating windows vtables")
+	WaitBox.show("Generating windows vtables")
 	wintables = gen_win_tables(winti)
 
-	WAITBOX.show("Comparing vtables")
+	WaitBox.show("Comparing vtables")
 	functables = compare_tables(wintables, linuxtables)
 
 	if VOPTIONS.cExportOptions in (VOptions.ExportOnly, VOptions.ExportNormal):
@@ -1191,7 +1188,7 @@ def write_vtables():
 			print("[VTABLE IO] No export file specified.")
 			return
 
-		WAITBOX.show("Writing to file")
+		WaitBox.show("Writing to file")
 		exporttable = build_export_table(linuxtables, functables)
 		with open(VOPTIONS.iFileExport, "w") as f:
 			json.dump(exporttable, f, indent=4, sort_keys=True)
@@ -1231,7 +1228,7 @@ def main():
 		print("Please file a bug report with supporting information at https://github.com/Scags/IDA-Scripts/issues")
 		idaapi.beep()
 
-	WAITBOX.hide()
+	WaitBox.hide()
 
 # import cProfile
 # cProfile.run("main()", "vtable_io.prof")

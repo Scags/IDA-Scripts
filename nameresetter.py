@@ -8,7 +8,7 @@ def main():
 		segend = idaapi.getseg(segstart).end_ea
 		for fea in idautils.Functions(segstart, segend):
 			flags = idaapi.get_full_flags(fea)
-			if not (flags & idaapi.FF_NAME):
+			if not (flags & idc.FF_NAME):
 				continue
 
 			fflags = idc.get_func_attr(fea, idc.FUNCATTR_FLAGS)
