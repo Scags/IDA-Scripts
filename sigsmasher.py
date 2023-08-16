@@ -2,14 +2,11 @@ import idautils
 import idc
 import idaapi
 import yaml
+import time
 
 from math import floor
-from time import time, strftime, gmtime
 
 MAX_SIG_LENGTH = 512
-
-FUNCS_SEGSTART = 0
-FUNCS_SEGEND = None
 
 # Change to 1 to have a very optimized makesig
 # Will produce useable signatures but theyll be a bit more volatile
@@ -17,194 +14,243 @@ FUNCS_SEGEND = None
 # Uses the end of the function to search compared to the end of the .text segment
 ABSOLUTE_OPTIMIZATION = 0
 
-def get_dt_size(dtype):
-	return {
-		idaapi.dt_byte: 1,
-		idaapi.dt_word: 2,
-		idaapi.dt_dword: 4,
-		idaapi.dt_float: 4,
-		idaapi.dt_double: 8,
-	}.get(dtype, -1)
+# Write-only trie for signatures
+# This is slightly faster than constantly running search_binary as 
+# common signature prologues will be caught early and more quickly
+class Trie(object):
+	def __init__(self):
+		self.root = {}
 
-def print_wildcards(count):
-	return "? " * count
+	def add(self, data):
+		node = self.root
+		for d in data:
+			if d not in node:
+				node[d] = {}
+			node = node[d]
+
+	def find(self, data):
+		node = self.root
+		for d in data:
+			if d not in node:
+				return False
+			node = node[d]
+		return True
+
+	def __contains__(self, data):
+		return self.find(data)
+	
+TRIE = Trie()
+
+# Idiot proof IDA wait box
+
+
+class WaitBox:
+	buffertime = 0.0
+	shown = False
+	msg = ""
+
+	@staticmethod
+	def _show(msg):
+		WaitBox.msg = msg
+		if WaitBox.shown:
+			idaapi.replace_wait_box(msg)
+		else:
+			idaapi.show_wait_box(msg)
+			WaitBox.shown = True
+
+	@staticmethod
+	def show(msg, buffertime=0.1):
+		if msg == WaitBox.msg:
+			return
+
+		if buffertime > 0.0:
+			if time.time() - WaitBox.buffertime < buffertime:
+				return
+			WaitBox.buffertime = time.time()
+		WaitBox._show(msg)
+
+	@staticmethod
+	def hide():
+		if WaitBox.shown:
+			idaapi.hide_wait_box()
+			WaitBox.shown = False
+
+FUNCS_SEGEND = idc.BADADDR
+def calc_sigstop():
+	endea = idc.BADADDR
+	for segea in idautils.Segments():
+		s = idaapi.getseg(segea)
+		if s.perm & idaapi.SEGPERM_EXEC:
+			segstart = segea
+			# Set the end ea to the end of the last executable segment
+			# Speed isn't as important in this script, so reading any extra X
+			# segments is fine
+			if endea == idc.BADADDR or endea < segstart + s.size():
+				endea = segstart + s.size()
+
+	return endea
 
 def is_good_sig(sig, funcend):
+	if sig in TRIE:
+		return False
+	
+	bytesig = " ".join(sig)
+
 	endea = funcend if ABSOLUTE_OPTIMIZATION else FUNCS_SEGEND
 	count = 0
-	addr = FUNCS_SEGSTART	# Linux has a .LOAD section in front
-							# The odds of this having matching bytes are about 0
-							# so let's just skip it, would save a lot of time
-	addr = idaapi.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+	addr = 0
+	addr = idaapi.find_binary(addr, endea, bytesig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 	while count < 2 and addr != idc.BADADDR:
 		count = count + 1
-		addr = idaapi.find_binary(addr, endea, sig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
+		addr = idaapi.find_binary(addr, endea, bytesig, 0, idc.SEARCH_DOWN|idc.SEARCH_NEXT)
 
-	return count == 1
+	# Good sig, add it to the trie
+	if count == 1:
+		TRIE.add(sig)
+		return True
 
-def makesig(func):
-	sig = ""
+	return False
+
+def makesigfast(func):
+	addr = func.start_ea
 	found = 0
-	funcstart = func.start_ea
-	funcend = func.end_ea
-	done = 0
-	global MAX_SIG_LENGTH
 
-	addr = funcstart
+	sig = []
 	while addr != idc.BADADDR:
 		info = idaapi.insn_t()
 		if not idaapi.decode_insn(info, addr):
 			return None
 
 		done = 0
-		if info.Op1.type == idaapi.o_near or info.Op1.type == idaapi.o_far:
-			if (idc.get_wide_byte(addr)) == 0x0F: 	# Two-byte instruction
-				sig = sig + ("0F %02X " % idc.get_wide_byte(addr + 1)) + print_wildcards(get_dt_size(info.Op1.dtype))
-			else:
-				sig = sig + ("%02X " % idc.get_wide_byte(addr)) + print_wildcards(get_dt_size(info.Op1.dtype))
+		if info.Op1.type in (idaapi.o_near, idaapi.o_far):
+			insnsz = 2 if idaapi.get_byte(addr) == 0x0F else 1
+			sig += [f"{idaapi.get_byte(addr+i):02X}" for i in range(insnsz)] + ["?"] * (info.size - insnsz)
+			done = 1
+		elif info.Op1.type == idaapi.o_reg and info.Op2.type == idaapi.o_mem and info.Op2.addr != idc.BADADDR:
+			sig += [f"{idaapi.get_byte(addr+i):02X}" for i in range(info.Op2.offb)] + ["?"] * (info.size - info.Op2.offb)
 			done = 1
 
 		if not done: 	# Unknown, just wildcard addresses
 			i = 0
-			size = idc.get_item_size(addr)
-			while 1:	# Screw u python
+			while i < info.size:
 				loc = addr + i
-				if ((idc.get_fixup_target_type(loc) & 0xF) == idaapi.FIXUP_OFF32):
-					sig = sig + print_wildcards(4)
-					i = i + 3
+				if ((idc.get_fixup_target_type(loc) & 0x0F) == idaapi.FIXUP_OFF32):
+					sig += ["?"] * 4
+					i += 3
+				elif (idc.get_fixup_target_type(loc) & 0x0F) == idaapi.FIXUP_OFF64:
+					sig += ["?"] * 8
+					i += 7
 				else:
-					sig = sig + ("%02X " % idc.get_wide_byte(loc))
+					sig += [f"{idaapi.get_byte(addr+i):02X}"]
 
-				i = i + 1
-
-				if i >= size:
-					break
+				i += 1
 
 		# Escape the evil functions that break everything
 		if len(sig) > MAX_SIG_LENGTH:
 			return "Signature is too long!"
 		# Save milliseconds and only check for good sigs after a fewish bytes
 		# Trust me, it matters
-		elif sig.count(" ") >= 5 and is_good_sig(sig, funcend):
+		elif len(sig) >= 5 and is_good_sig(sig, func.end_ea):
 			found = 1
 			break
 
-		addr = idc.next_head(addr, funcend)
+		addr = idc.next_head(addr, func.end_ea)
 
 	if found == 0:
 		return "Ran out of bytes!"
 
-	l = len(sig) - 1
-	smsig = r"\x"
-	for i in range(l):
-		c = sig[i]
-		if c == " ":
-			smsig = smsig + r"\x"
-		elif c == "?":
-			smsig = smsig + "2A"
-		else:
-			smsig = smsig + c
-
+	smsig = r"\x" + r"\x".join(sig)
+	smsig = smsig.replace("?", "2A")
 	return smsig
 
-UPDATE_TIME = time()
-def update_window(activity):
-	global UPDATE_TIME
-	currtime = time()
-	if currtime - UPDATE_TIME > 0.2:
-		UPDATE_TIME = currtime
-		idaapi.replace_wait_box(activity)
-
-def calc_func_segments():
-	global FUNCS_SEGSTART, FUNCS_SEGEND
-	seg = idaapi.get_segm_by_name(".text")
-	if seg:
-		FUNCS_SEGSTART = seg.start_ea
-		FUNCS_SEGEND = seg.end_ea
-
 def main():
-	idaapi.set_ida_state(idaapi.st_Work)
-	root = {}
+	try:
+		root = {}
 
-	count = 0
-	sigcount = 0
-	sigattempts = 0
+		f = idaapi.ask_file(1, "*.yml", "Choose a file to save to")
+		if not f:
+			return
 
-	calc_func_segments()
+		skip = idaapi.ask_yn(1, "Skip unnamed functions (e.g. ones that start with \"sub_\")?")
+		if skip == -1:
+			return
 
-	funcs = list(idautils.Functions(FUNCS_SEGSTART, FUNCS_SEGEND))
+		idaapi.set_ida_state(idaapi.st_Work)
+		global FUNCS_SEGEND
+		FUNCS_SEGEND = calc_sigstop()
 
-	alltime = 0.0
-	avgtime = 0.0
+		funcs = list(idautils.Functions())
+		siglist = []
 
-	f = idaapi.ask_file(1, "*.yml", "Choose a file to save to")
-	if not f:
-		return
+		for i in range(len(funcs)):
+			fea = funcs[i]
+			flags = idaapi.get_full_flags(fea)
+			if not idaapi.is_func(flags):
+				continue
 
-	skip = idaapi.ask_yn(1, "Skip functions that start with \"sub_\"?")
-	if skip == -1:
-		return
+			if skip and not idaapi.has_name(flags):
+				continue
 
-	# Clean up and get rid of shitty funcs
-	funccpy = funcs[:]
-	for fea in funccpy:
-		funcname = idaapi.get_func_name(fea)
-		if funcname is None or funcname.startswith("nullsub"):
-			funcs.remove(fea)
-			continue
+			func = idaapi.get_func(fea)
+			# Thunks and lib funcs
+			if func.flags & (idaapi.FUNC_LIB | idaapi.FUNC_THUNK):
+				continue
 
-		if skip and funcname.startswith("sub"):
-			funcs.remove(fea)
-			continue			
+			funcname = idaapi.get_name(fea)
+			unmangled = idaapi.demangle_name(funcname, idaapi.MNG_SHORT_FORM)
+			if unmangled is not None:
+				# Skip jmp stubs
+				if unmangled.startswith("j_"):
+					continue
 
-		flags = idc.get_func_attr(fea, idc.FUNCATTR_FLAGS)
-		if flags & idaapi.FUNC_LIB:
-			funcs.remove(fea)
-			continue
+				# Nullsub
+				if unmangled.startswith("nullsub"):
+					continue
 
-	funccount = len(funcs)
-	for fea in funcs:
-		starttime = time()
+			siglist.append(func)
 
-		func = idaapi.get_func(fea)
-		funcname = idaapi.get_func_name(fea)
-		if funcname != None:
-			unmangled = idc.demangle_name(funcname, idc.get_inf_attr(idc.INF_SHORT_DN))
+		totalcount = len(siglist)
+		actualstarttime = time.time()
+		sigcount = 0
+		for i, func in enumerate(siglist):
+			funcname = idaapi.get_name(func.start_ea)
+			unmangled = idaapi.demangle_name(funcname, idaapi.MNG_SHORT_FORM)
 			if unmangled is None:
 				unmangled = funcname
 
-			sig = makesig(func)
-			sigattempts += 1
+			sig = makesigfast(func)
 			root[unmangled] = {"mangled": funcname, "signature": sig}
 
 			if sig:
 				sigcount += (0 if "!" in sig else 1)
 
-		# Only ETA makesig() attempts, otherwise the timing is really off
-		# Unfortunately, sigging takes progressively longer the further along the function list
-		# this goes, as makesig() searches from up to down while functions are ordered from up to down
-		# So this isn't really accurate but w/e
+			# Unfortunately, sigging takes progressively longer the further along the function list
+			# this goes, as makesig() searches from top to bottom while functions are ordered from top to bottom
+			# So this isn't really accurate but w/e
 
-		multpct = 2.0 - count / float(funccount)	# Scale up a bit the lower we start at the get a halfass decent eta
-		alltime += time() - starttime
-		avgtime = alltime / sigattempts
-		eta = int(avgtime * (funccount - count) * multpct)
-		etastr = strftime("%H:%M:%S", gmtime(eta))
+			totaltime = time.time() - actualstarttime
+			count = i + 1
+			avgtime = totaltime / count
+			eta = int(avgtime * (totalcount - count))
+			etastr = time.strftime("%H:%M:%S", time.gmtime(eta))
 
-		count += 1
-		update_window("Evaluated {} out of {} ({}%)\nETA: {}".format(count, funccount, floor(count / float(funccount) * 100.0 * 10.0) / 10.0, etastr))
+			WaitBox.show(f"Evaluated {count} out of {totalcount} ({floor(i / float(totalcount) * 100.0 * 10.0) / 10.0}%)\nETA: {etastr}")
 
-	while f.count(".yml") >= 2:
-		f = f.replace(".yml", "", 1)
-	if not f.endswith(".yml"):
-		f += ".yml"
+		WaitBox.show("Saving to file")
+		with open(f, "w") as f:
+			yaml.safe_dump(root, f, default_flow_style=False, width=999999)
 
-	with open(f, "w") as f:
-		yaml.safe_dump(root, f, default_flow_style = False, width = 999999)
-
-	idaapi.hide_wait_box()
-	print("Successfully generated {} signatures from {} functions".format(sigcount, funccount))
+		totaltime = time.strftime("%H:%M:%S", time.gmtime(time.time() - actualstarttime))
+		print(f"Successfully generated {sigcount} signatures from {totalcount} functions in {totaltime}")
+	except:
+		import traceback
+		traceback.print_exc()
+		print("Please file a bug report with supporting information at https://github.com/Scags/IDA-Scripts/issues")
+		idaapi.beep()
 
 	idaapi.set_ida_state(idaapi.st_Ready)
+	WaitBox.hide()
 
+# import cProfile
+# cProfile.run("main()", "sigsmasher.prof")
 main()

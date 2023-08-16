@@ -3,7 +3,7 @@ import idautils
 import idaapi
 import json
 
-from time import time
+import time
 from sys import version_info
 
 # Are we reading this DB or writing to it. Not to be confused with reading from/writing to the work file
@@ -12,6 +12,38 @@ Mode_Write = 0
 Mode_Read = 1
 
 DEBUG = 0
+
+# Idiot proof IDA wait box
+class WaitBox:
+	buffertime = 0.0
+	shown = False
+	msg = ""
+
+	@staticmethod
+	def _show(msg):
+		WaitBox.msg = msg
+		if WaitBox.shown:
+			idaapi.replace_wait_box(msg)
+		else:
+			idaapi.show_wait_box(msg)
+			WaitBox.shown = True
+
+	@staticmethod
+	def show(msg, buffertime = 0.1):
+		if msg == WaitBox.msg:
+			return
+
+		if buffertime > 0.0:
+			if time.time() - WaitBox.buffertime < buffertime:
+				return
+			WaitBox.buffertime = time.time()
+		WaitBox._show(msg)
+
+	@staticmethod
+	def hide():
+		if WaitBox.shown:
+			idaapi.hide_wait_box()
+			WaitBox.shown = False
 
 def get_action():
 	return idaapi.ask_buttons("Reading from", "Writing to", "", 0, "What action are we performing on this database?")
@@ -25,19 +57,6 @@ def get_file(action):
 
 # Show how many functions we've found
 FOUND_FUNCS = set()
-# Don't update asap as that throttles script speed, split sec is fine ig
-UPDATE_TIME = time()
-def update_window(activity, hidefuncs = False):
-	global UPDATE_TIME
-	if not hidefuncs:
-		currtime = time()
-		if currtime - UPDATE_TIME > 0.2:
-			activity += "\nFunctions found: {}".format(len(FOUND_FUNCS))
-			UPDATE_TIME = currtime
-		else:
-			return
-
-	idaapi.replace_wait_box(activity)
 
 # Format:
 # "String Name":
@@ -83,12 +102,12 @@ def build_data_dict(strdict):
 	return funcs
 
 def read_strs(strings, file):
-	update_window("Reading strings", True)
+	WaitBox.show("Reading strings", True)
 	# Build an organized dictionary of the string data we can get
 	strdict = build_xref_dict(strings)
 	# Then reorient it around functions, then dump it
 	funcdict = build_data_dict(strdict)
-	update_window("Dumping to file", True)
+	WaitBox.show("Dumping to file", True)
 	# Running the script in write mode will build a similar dict then compare the two through functions
 	json.dump(funcdict, file, indent = 4, sort_keys = True)
 
@@ -100,7 +119,7 @@ def get_bcompat_keys(d):
 
 def write_exact_comp(strdict, funcdict, myfuncs):
 	global FOUND_FUNCS
-	update_window("Writing exact comparisons")
+	WaitBox.show("Writing exact comparisons")
 	count = 0
 
 	for strippedname, strippedlist in get_bcompat_iter(strdict):
@@ -127,7 +146,7 @@ def write_exact_comp(strdict, funcdict, myfuncs):
 			count += 1
 
 			FOUND_FUNCS.add(possibilities[0])
-			update_window("Writing exact comparisons")
+			WaitBox.show("Writing exact comparisons")
 		elif DEBUG:
 			print("{} is probably wrong!".format(idc.demangle_name(possibilities[0], idc.get_inf_attr(idc.INF_SHORT_DN))))
 
@@ -136,7 +155,7 @@ def write_exact_comp(strdict, funcdict, myfuncs):
 def write_simple_comp(strdict, funcdict, myfuncs, liw = True):
 	global FOUND_FUNCS
 	s = "symboled in stripped" if liw else "stripped in symboled"
-	update_window("Writing simple comparisons ({})".format(s))
+	WaitBox.show("Writing simple comparisons ({})".format(s))
 	count = 0
 
 	for strippedname, strippedlist in get_bcompat_iter(strdict):
@@ -167,7 +186,7 @@ def write_simple_comp(strdict, funcdict, myfuncs, liw = True):
 			count += 1
 
 			FOUND_FUNCS.add(possibilities[0])
-			update_window("Writing simple comparisons ({})".format(s))
+			WaitBox.show("Writing simple comparisons ({})".format(s))
 		elif DEBUG:
 			print("{} is probably wrong!".format(idc.demangle_name(possibilities[0], idc.get_inf_attr(idc.INF_SHORT_DN))))
 
@@ -191,7 +210,7 @@ def clean_data_dict(strdict):
 #	strdict = resultant
 
 def write_symbols(strings, file):
-	update_window("Loading file", True)
+	WaitBox.show("Loading file", True)
 	funcdict = json.load(file)
 	if not funcdict:
 		idaapi.warning("Could not load function data from file")
@@ -226,25 +245,31 @@ def write_symbols(strings, file):
 	return exact_count, liw, wil
 
 def main():
-	action = get_action()
-	if action == Mode_Invalid:
-		return
+	try:
+		action = get_action()
+		if action == Mode_Invalid:
+			return
 
-	file = get_file(action)
-	if file is None:
-		return
+		file = get_file(action)
+		if file is None:
+			return
 
-#	strings = get_strs()
-	strings = list(idautils.Strings())
-	if action == Mode_Read:
-		read_strs(strings, file)
-		print("Done!")
-	else:
-		c1, c2, c3 = write_symbols(strings, file)
-		print("Successfully typed {} functions".format(len(FOUND_FUNCS)))
-		print("\t- {} Exact\n\t- {} Symboled in stripped\n\t- {} Stripped in symboled".format(c1, c2, c3))
+	#	strings = get_strs()
+		strings = list(idautils.Strings())
+		if action == Mode_Read:
+			read_strs(strings, file)
+			print("Done!")
+		else:
+			c1, c2, c3 = write_symbols(strings, file)
+			print("Successfully typed {} functions".format(len(FOUND_FUNCS)))
+			print("\t- {} Exact\n\t- {} Symboled in stripped\n\t- {} Stripped in symboled".format(c1, c2, c3))
+	except:
+		import traceback
+		traceback.print_exc()
+		print("Please file a bug report with supporting information at https://github.com/Scags/IDA-Scripts/issues")
+		idaapi.beep()
 
-	idaapi.hide_wait_box()
+	WaitBox.hide()
 	file.close()
 
 main()
