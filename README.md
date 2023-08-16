@@ -1,6 +1,10 @@
 # IDA Scripts
 Some random IDA scripts I wrote
 
+## V2.0
+
+These scripts were heavily modified on 8/16/2023. For a full writeup on the new changes, see [here](https://github.com/Scags/IDA-Scripts/pull/2).
+
 ### distfromfunc.py ###
 
 Get the offset from the cursor address and the start of a function. Useful for byte patching.
