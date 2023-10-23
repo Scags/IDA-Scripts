@@ -132,7 +132,7 @@ class WaitBox:
 			WaitBox.shown = True
 
 	@staticmethod
-	def show(msg, buffertime = 0.1):
+	def show(msg, buffertime=0.1):
 		if msg == WaitBox.msg:
 			return
 
@@ -404,8 +404,8 @@ def create_structs(data):
 		classstruc = idaapi.get_struc(classstrucid)
 		for thisoffs, vfuncs in vtables.items():
 			thisoffs = abs(thisoffs)
-			postfix = f"{thisoffs:x}" if thisoffs != 0 else ""
-			structype = f"{classname}_vtbl{postfix}"
+			postfix = f"_{thisoffs:04X}" if thisoffs != 0 else ""
+			structype = f"{classname}{postfix}{idaapi.VTBL_SUFFIX}"
 			structype = idaapi.validate_name(structype, idaapi.VNT_TYPE, idaapi.SN_IDBENC)
 
 			vtablestrucid = add_struc_ex(structype)
@@ -446,14 +446,14 @@ def create_structs(data):
 					opinfo.ri.base = 0
 					opinfo.ri.tdelta = 0
 
-					serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF|idc.FF_1OFF, opinfo, ctypes.sizeof(ea_t))
+					serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF, opinfo, ctypes.sizeof(ea_t))
 					# Failed, so there was either an invalid name or a name collision
 					if serr == idaapi.STRUC_ERROR_MEMBER_NAME:
 						targetname = idaapi.validate_name(targetname, idaapi.VNT_IDENT, idaapi.SN_IDBENC)
-						serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF|idc.FF_1OFF, opinfo, ctypes.sizeof(ea_t))
+						serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF, opinfo, ctypes.sizeof(ea_t))
 						if serr == idaapi.STRUC_ERROR_MEMBER_NAME:
-							targetname = f"{targetname}_{offs:x}"
-							serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF|idc.FF_1OFF, opinfo, ctypes.sizeof(ea_t))
+							targetname = f"{targetname}_{offs:X}"
+							serr = idaapi.add_struc_member(vtablestruc, targetname, offs, FF_PTR|idc.FF_0OFF, opinfo, ctypes.sizeof(ea_t))
 
 					if serr != idaapi.STRUC_ERROR_MEMBER_OK:
 						print(vtablestruc, vtablestrucid)
@@ -467,7 +467,7 @@ def create_structs(data):
 
 			vmember = idaapi.get_member(classstruc, thisoffs)
 			if not vmember:
-				if idaapi.add_struc_member(classstruc, f"vftbl{postfix}", thisoffs, idc.FF_DATA|FF_PTR, None, ctypes.sizeof(ea_t)) == idaapi.STRUC_ERROR_MEMBER_OK:
+				if idaapi.add_struc_member(classstruc, f"{idaapi.VTBL_MEMNAME}{postfix}", thisoffs, idc.FF_DATA | FF_PTR, None, ctypes.sizeof(ea_t)) == idaapi.STRUC_ERROR_MEMBER_OK:
 					global STRUCTS
 					STRUCTS += 1
 					tinfo = idaapi.tinfo_t()
