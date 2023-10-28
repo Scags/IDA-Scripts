@@ -21,7 +21,7 @@ class WaitBox:
 			WaitBox.shown = True
 
 	@staticmethod
-	def show(msg, buffertime = 0.1):
+	def show(msg, buffertime=0.1):
 		if msg == WaitBox.msg:
 			return
 
@@ -40,7 +40,7 @@ class WaitBox:
 def main():
 	try:
 		idaapi.begin_type_updating(idaapi.UTP_STRUCT)
-		maxstructs = idaapi.get_last_struc_idx()
+		maxstructs = idaapi.get_struc_qty()
 		i = idaapi.get_first_struc_idx()
 		while i < maxstructs:
 			WaitBox.show(f"{floor(i / float(maxstructs) * 100.0 * 10.0) / 10.0}%")

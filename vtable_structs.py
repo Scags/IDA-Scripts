@@ -533,7 +533,7 @@ def parse_ti(ea, tis):
 	except:
 		print(f"[VTABLE STRUCTS] Invalid vtable name at {ea:#x}")
 		return
-	
+
 	if classname in tis.keys():
 		return
 
@@ -624,9 +624,17 @@ def string_method(type_info, vtabledata):
 def read_ti_win():
 	# Step 1, get the vftable of type_info
 	type_info = idc.get_name_ea_simple("??_7type_info@@6B@")
-	if type_info is None:
-		print("[VTABLE STRUCTS] type_info not found. Are you sure you're in a C++ binary?")
-		return None
+	if type_info == idc.BADADDR:
+		# If type_info doesn't exist as a label, we might still be able to snipe it with the string method
+		strings = list(idautils.Strings())
+		for s in strings:
+			if str(s) == ".?AVtype_info@@":
+				ea = s.ea - TypeDescriptor.name.offset
+				type_info = rva_to_ea(idaapi.get_wide_dword(ea))
+
+		if type_info == idc.BADADDR:
+			print("[VTABLE STRUCTS] type_info not found. Are you sure you're in a C++ binary?")
+			return None
 	
 	vtabledata = {}
 

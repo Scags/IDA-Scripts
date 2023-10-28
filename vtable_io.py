@@ -172,7 +172,7 @@ class WaitBox:
 			WaitBox.shown = True
 
 	@staticmethod
-	def show(msg, buffertime = 0.1):
+	def show(msg, buffertime=0.1):
 		if msg == WaitBox.msg:
 			return
 
@@ -509,12 +509,22 @@ def parse_ti(ea, tis):
 	flags = idaapi.get_full_flags(ea)
 	if is_code(flags):
 		return
+	
+	name = idc.get_name(ea)
+	if not name:
+		return
+
+	# Pointer type
+	# I have no idea what this is but it is not what we want
+	if name.startswith("??_R0P"):
+		return
 
 	try:
-		classname = idaapi.demangle_name(idc.get_name(ea), idaapi.MNG_SHORT_FORM)
+		classname = idaapi.demangle_name(name, idaapi.MNG_SHORT_FORM)
 		classname = classname.removeprefix("class ")
 		classname = classname.removeprefix("struct TypeDescriptor ")
 		classname = classname.removesuffix(" `RTTI Type Descriptor'")
+		classname = classname.strip()
 	except:
 		print(f"[VTABLE IO] Invalid vtable name at {ea:#x}")
 		return
@@ -722,7 +732,10 @@ def build_export_table(linuxtables, wintables):
 				if winidx != -1:
 					s = f"{s:<8}W{winidx}"
 
-				shortname = idaapi.demangle_name(mangledname, idaapi.MNG_SHORT_FORM) or "purecall"
+				if not mangledname.startswith("sub_"):
+					shortname = idaapi.demangle_name(mangledname, idaapi.MNG_SHORT_FORM) or "purecall"
+				else:
+					shortname = mangledname
 				newprepend = f"{prepend:<20}{s:<8}"
 				s = f"{newprepend:<36}{shortname}"
 				exportnode.append(s)
@@ -1030,7 +1043,7 @@ def thunk_dance(winitems, vclass, functable):
 					print(f"[VTABLE IO] Anomalous thunk: {vclass.name}::{f.postname}, mainwtable {len(mainwtable)} wtable {len(wtable)} thunkidx {thunkidx} thisoffs {thisoffs}")
 					pass
 			i += 1
-		
+
 		# Update current linux table
 		functable[thisoffs] = ltable
 
@@ -1176,9 +1189,12 @@ def write_vtables():
 	winti = read_ti_win()
 	if winti is None:
 		return
-
+	
 	WaitBox.show("Generating windows vtables")
 	wintables = gen_win_tables(winti)
+
+	if not wintables:
+		return
 
 	WaitBox.show("Comparing vtables")
 	functables = compare_tables(wintables, linuxtables)
