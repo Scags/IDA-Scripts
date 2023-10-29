@@ -113,4 +113,4 @@ This script is slightly heavy and has features that warrant explanation. Feature
 
 ### vtable_structs.py ###
 
-Runs through virtual tables and creates structs for them. Doesn't work with template classes. Use at your own risk since it screws up refencing members through pseudocode.
+Runs through virtual tables and creates structs for them. Use at your own risk since it screws up refencing members through pseudocode.
