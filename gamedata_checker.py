@@ -128,7 +128,7 @@ def read_vtable(funcname, ea):
 	funcs = {}
 	offset = 0
 	while ea != idc.BADADDR:
-		if idc.__EA64__:
+		if idaapi.inf_is_64bit():
 			offs = idaapi.get_qword(ea)
 		else:
 			offs = idaapi.get_dword(ea)

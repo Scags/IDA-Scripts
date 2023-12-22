@@ -8,7 +8,7 @@ import re
 
 from dataclasses import dataclass
 
-if idc.__EA64__:
+if idaapi.inf_is_64bit():
 	ea_t = ctypes.c_uint64
 	ptr_t = ctypes.c_int64
 	get_ptr = idaapi.get_qword
@@ -35,7 +35,7 @@ _RTTICompleteObjectLocator_fields = [
 		("pClassHierarchyDescriptor",  ctypes.c_uint32), 	# ref RTTIClassHierarchyDescriptor
 	]
 
-if idc.__EA64__:
+if idaapi.inf_is_64bit():
 	_RTTICompleteObjectLocator_fields.append(("pSelf", ctypes.c_uint32)) # ref to object's base
 
 class RTTICompleteObjectLocator(ctypes.Structure):
@@ -216,7 +216,7 @@ class VClass(object):
 
 		# In 64-bit PEs, the COL references itself, remove this
 		xrefs = list(idautils.XrefsTo(colea))
-		if idc.__EA64__:
+		if idaapi.inf_is_64bit():
 			for n in range(len(xrefs)-1, -1, -1):
 				if xrefs[n].frm == colea + RTTICompleteObjectLocator.pSelf.offset:
 					del xrefs[n]
@@ -338,7 +338,7 @@ def get_class_from_ea(classtype, ea):
 	return classtype.from_buffer_copy(bytestr)
 
 def rva_to_ea(ea):
-	if idc.__EA64__:
+	if idaapi.inf_is_64bit():
 		return idaapi.get_imagebase() + ea
 	return ea
 
@@ -585,7 +585,7 @@ def parse_ti(ea, tis):
 
 		# In 64-bit PEs, the COL references itself, remove this
 		refs = list(idautils.XrefsTo(ea))
-		if idc.__EA64__:
+		if idaapi.inf_is_64bit():
 			for n in range(len(refs)-1, -1, -1):
 				if refs[n].frm == ea + RTTICompleteObjectLocator.pSelf.offset:
 					del refs[n]

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 OS_Linux = 0
 OS_Win = 1
 
-if idc.__EA64__:
+if idaapi.inf_is_64bit():
 	ea_t = ctypes.c_uint64
 	ptr_t = ctypes.c_int64
 	get_ptr = idaapi.get_qword
@@ -32,7 +32,7 @@ _RTTICompleteObjectLocator_fields = [
 		("pClassHierarchyDescriptor",  ctypes.c_uint32), 	# ref RTTIClassHierarchyDescriptor
 	]
 
-if idc.__EA64__:
+if idaapi.inf_is_64bit():
 	_RTTICompleteObjectLocator_fields.append(("pSelf", ctypes.c_uint32)) # ref to object's base
 
 class RTTICompleteObjectLocator(ctypes.Structure):
@@ -247,7 +247,7 @@ def get_func_postname(name):
 	return retname
 
 def rva_to_ea(ea):
-	if idc.__EA64__:
+	if idaapi.inf_is_64bit():
 		return idaapi.get_imagebase() + ea
 	return ea
 
@@ -441,7 +441,7 @@ def create_structs(data):
 				else:
 					opinfo = idaapi.opinfo_t()
 					# I don't think this does anything
-					opinfo.ri.flags = idaapi.REF_OFF64 if idc.__EA64__ else idaapi.REF_OFF32
+					opinfo.ri.flags = idaapi.REF_OFF64 if idaapi.inf_is_64bit() else idaapi.REF_OFF32
 					opinfo.ri.target = vfunc.funcref.ea
 					opinfo.ri.base = 0
 					opinfo.ri.tdelta = 0
@@ -589,7 +589,7 @@ def parse_ti(ea, tis):
 
 		# In 64-bit PEs, the COL references itself, remove this
 		refs = list(idautils.XrefsTo(ea))
-		if idc.__EA64__:
+		if idaapi.inf_is_64bit():
 			for n in range(len(refs)-1, -1, -1):
 				if refs[n].frm == ea + RTTICompleteObjectLocator.pSelf.offset:
 					del refs[n]

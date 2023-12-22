@@ -11,7 +11,7 @@ import xml.etree.ElementTree as et
 from dataclasses import dataclass
 from enum import Enum
 
-if idc.__EA64__:
+if idaapi.inf_is_64bit():
 	ea_t = ctypes.c_uint64
 	FF_PTR = idc.FF_QWORD
 else:
